@@ -42,11 +42,33 @@ body {
 }
 
 .scene-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: calc(100vh - 32px);
+  min-width: 460px;
+  min-height: 420px;
+  resize: both;
   border-radius: 14px;
   overflow: hidden;
+}
+
+.scene-panel::after,
+.cloud-overlay::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 18px;
+  height: 18px;
+  border-right: 2px solid rgba(185, 208, 255, 0.72);
+  border-bottom: 2px solid rgba(185, 208, 255, 0.72);
+  background:
+    linear-gradient(135deg, transparent 0 42%, rgba(185, 208, 255, 0.32) 43% 50%, transparent 51%),
+    linear-gradient(135deg, transparent 0 62%, rgba(185, 208, 255, 0.28) 63% 70%, transparent 71%);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 4;
 }
 
 .scene-toolbar {
@@ -299,6 +321,7 @@ input {
   .scene-panel {
     height: 68vh;
     min-height: 520px;
+    min-width: 0;
   }
 
   .sidebar {

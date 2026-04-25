@@ -329,17 +329,13 @@ function setupUI() {
 
 function applySensorPreset(writeLog) {
   const preset = SENSOR_PRESETS[els.sensorPreset.value] || SENSOR_PRESETS.spinning;
-  const custom = els.sensorPreset.value === 'custom';
-  if (!custom) {
+  if (els.sensorPreset.value !== 'custom') {
     els.horizontalRays.value = String(preset.horizontalRays);
     els.verticalRays.value = String(preset.verticalRays);
     els.horizontalFov.value = String(preset.horizontalFov);
     els.verticalFov.value = String(preset.verticalFov);
     els.maxRange.value = String(preset.maxRange);
   }
-  [els.horizontalRays, els.verticalRays, els.horizontalFov, els.verticalFov, els.maxRange].forEach((input) => {
-    input.disabled = !custom;
-  });
   if (writeLog) {
     logMessage(`Sensor tuned for ${preset.label}.`);
   }
