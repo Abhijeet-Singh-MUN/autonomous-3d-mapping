@@ -1,5 +1,7 @@
 # Autonomous Room LiDAR Sim
 
+Working repo name: `autonomous-3d-mapping`
+
 This is a standalone Three.js + Vite simulator for an autonomous drone that:
 
 - bootstraps a map from LiDAR data
@@ -69,6 +71,7 @@ Use `Export PLY` after a mission to save the current colored point cloud for lat
 
 ### 2026-04-25
 
+- Standardized the project/package name on `autonomous-3d-mapping`.
 - Added repository hygiene with `.gitignore`.
 - Split core simulator logic into reusable modules for constants, math helpers, voxel-grid state, and 3D planning.
 - Corrected the voxel coordinate model so vertical planning uses `layer`/Y instead of mixing Y and Z axes.
