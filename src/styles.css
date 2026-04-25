@@ -1,0 +1,332 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  background: #09111f;
+  color: #ebf2ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(80, 127, 255, 0.22), transparent 38%),
+    linear-gradient(180deg, #09111f 0%, #070b12 100%);
+}
+
+body {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(360px, 480px);
+  gap: 16px;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.scene-panel,
+.panel,
+.cloud-overlay {
+  background: rgba(8, 15, 27, 0.86);
+  border: 1px solid rgba(150, 179, 255, 0.14);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(14px);
+}
+
+.scene-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 32px);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.scene-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(143, 172, 255, 0.12);
+}
+
+.scene-toolbar h1,
+.panel-head h2,
+.cloud-header h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 650;
+}
+
+.scene-toolbar p,
+.panel-head p,
+.eyebrow {
+  margin: 0;
+  color: #8ea5d5;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.status-cluster {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.status-pill,
+.stat-card {
+  min-width: 92px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 25, 44, 0.92);
+  border: 1px solid rgba(150, 179, 255, 0.12);
+}
+
+.status-label,
+.stat-card span {
+  display: block;
+  color: #88a0d4;
+  font-size: 0.72rem;
+}
+
+.status-pill strong,
+.stat-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.95rem;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport canvas,
+.cloud-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.panel {
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.panel-head {
+  margin-bottom: 14px;
+}
+
+.button-row {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.button-row--wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid rgba(154, 179, 255, 0.14);
+  background: rgba(15, 23, 40, 0.95);
+  color: #eef4ff;
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+button:hover {
+  background: rgba(22, 33, 56, 1);
+  border-color: rgba(160, 190, 255, 0.24);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button.primary {
+  background: linear-gradient(180deg, #2f89ff 0%, #276fd1 100%);
+  border-color: rgba(122, 182, 255, 0.45);
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.control-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-grid span {
+  color: #a9b8dc;
+  font-size: 0.83rem;
+}
+
+select,
+input {
+  min-height: 38px;
+  border-radius: 8px;
+  border: 1px solid rgba(150, 179, 255, 0.15);
+  background: rgba(12, 19, 34, 0.94);
+  color: #f5f8ff;
+  padding: 0 10px;
+}
+
+.stats-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.stats-grid--wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.graph-panel canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 18 / 13;
+  border-radius: 8px;
+  background: rgba(9, 14, 24, 0.96);
+  border: 1px solid rgba(140, 170, 255, 0.12);
+}
+
+.log-window {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.log-entry {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(11, 18, 30, 0.95);
+  border: 1px solid rgba(143, 172, 255, 0.1);
+}
+
+.log-entry time {
+  display: block;
+  color: #86a0d8;
+  font-size: 0.75rem;
+  margin-bottom: 4px;
+}
+
+.log-entry p {
+  margin: 0;
+  color: #e6edff;
+  font-size: 0.9rem;
+}
+
+.cloud-overlay {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: min(37vw, 540px);
+  min-width: 320px;
+  min-height: 260px;
+  height: min(38vh, 390px);
+  border-radius: 12px;
+  overflow: hidden;
+  resize: both;
+  z-index: 20;
+}
+
+.cloud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  cursor: move;
+  user-select: none;
+  border-bottom: 1px solid rgba(143, 172, 255, 0.12);
+}
+
+.overlay-meta {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 24, 42, 0.92);
+  color: #b9cbf1;
+  font-size: 0.85rem;
+}
+
+.cloud-viewport {
+  width: 100%;
+  height: calc(100% - 74px);
+}
+
+@media (max-width: 1240px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-panel {
+    height: 68vh;
+    min-height: 520px;
+  }
+
+  .sidebar {
+    max-height: none;
+    overflow: visible;
+    padding-bottom: 120px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .scene-toolbar {
+    flex-direction: column;
+  }
+
+  .button-row--wide,
+  .control-grid,
+  .stats-grid--wide {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-overlay {
+    inset: auto 12px 12px 12px;
+    width: auto;
+    min-width: 0;
+  }
+}

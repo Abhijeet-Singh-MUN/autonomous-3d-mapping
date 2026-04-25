@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Autonomous Room LiDAR Simulator</title>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <section class="scene-panel">
+        <div class="scene-toolbar">
+          <div>
+            <p class="eyebrow">Autonomous Room LiDAR Lab</p>
+            <h1>Drone room exploration and point-cloud capture</h1>
+          </div>
+          <div class="status-cluster">
+            <div class="status-pill">
+              <span class="status-label">Mode</span>
+              <strong id="modeReadout">Stepped</strong>
+            </div>
+            <div class="status-pill">
+              <span class="status-label">State</span>
+              <strong id="stateReadout">Idle</strong>
+            </div>
+            <div class="status-pill">
+              <span class="status-label">Points</span>
+              <strong id="pointsReadout">0</strong>
+            </div>
+          </div>
+        </div>
+        <div id="sceneViewport" class="viewport"></div>
+      </section>
+
+      <aside class="sidebar">
+        <section class="panel controls-panel">
+          <div class="panel-head">
+            <h2>Mission Controls</h2>
+            <p>Room generation, autonomy, and LiDAR configuration</p>
+          </div>
+
+          <div class="button-row button-row--wide">
+            <button id="startBtn" class="primary">Start</button>
+            <button id="pauseBtn">Pause</button>
+            <button id="continueBtn">Continue</button>
+            <button id="resetBtn">Reset</button>
+            <button id="randomizeBtn">Randomize Room</button>
+            <button id="exportBtn">Export PLY</button>
+          </div>
+
+          <div class="control-grid">
+            <label>
+              <span>Room preset</span>
+              <select id="roomPreset">
+                <option value="mixed">Mixed room</option>
+                <option value="living">Living room</option>
+                <option value="bedroom">Bedroom</option>
+              </select>
+            </label>
+            <label>
+              <span>Scan mode</span>
+              <select id="scanMode">
+                <option value="stepped">Stepped</option>
+                <option value="continuous">Continuous</option>
+              </select>
+            </label>
+            <label>
+              <span>Sensor preset</span>
+              <select id="sensorPreset">
+                <option value="spinning">Spinning LiDAR</option>
+                <option value="forward">Forward LiDAR</option>
+                <option value="depthcam">Depth camera</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label>
+              <span>Planner</span>
+              <select id="plannerMode">
+                <option value="astar">A*</option>
+                <option value="weighted">Weighted A*</option>
+                <option value="greedy">Greedy best-first</option>
+              </select>
+            </label>
+            <label>
+              <span>Steering style</span>
+              <select id="pathStyle">
+                <option value="hybrid">Hybrid</option>
+                <option value="manhattan">Manhattan</option>
+                <option value="curved">Curved</option>
+              </select>
+            </label>
+            <label>
+              <span>Ceiling obstacle</span>
+              <select id="ceilingObstacles">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label>
+              <span>Room width</span>
+              <input id="roomWidth" type="number" min="5" max="14" step="0.5" value="8.5" />
+            </label>
+            <label>
+              <span>Room depth</span>
+              <input id="roomDepth" type="number" min="5" max="14" step="0.5" value="7.5" />
+            </label>
+            <label>
+              <span>Room height</span>
+              <input id="roomHeight" type="number" min="2.6" max="5" step="0.1" value="3.3" />
+            </label>
+            <label>
+              <span>Furniture count</span>
+              <input id="furnitureCount" type="number" min="3" max="14" step="1" value="7" />
+            </label>
+            <label>
+              <span>Vertical seed levels</span>
+              <input id="heightBands" type="number" min="2" max="8" step="1" value="4" />
+            </label>
+            <label>
+              <span>Bootstrap scans</span>
+              <input id="bootstrapScans" type="number" min="1" max="12" step="1" value="6" />
+            </label>
+            <label>
+              <span>Safety radius</span>
+              <input id="safetyRadius" type="number" min="0.2" max="1.4" step="0.05" value="0.42" />
+            </label>
+            <label>
+              <span>Goal reach radius</span>
+              <input id="goalReachRadius" type="number" min="0.1" max="0.9" step="0.05" value="0.28" />
+            </label>
+            <label>
+              <span>Voxel resolution</span>
+              <input id="gridSize" type="number" min="0.45" max="1.6" step="0.05" value="0.9" />
+            </label>
+            <label>
+              <span>Move speed</span>
+              <input id="moveSpeed" type="number" min="0.2" max="4" step="0.1" value="1.35" />
+            </label>
+            <label>
+              <span>Horizontal rays</span>
+              <input id="horizontalRays" type="number" min="24" max="180" step="6" value="72" />
+            </label>
+            <label>
+              <span>Vertical rays</span>
+              <input id="verticalRays" type="number" min="8" max="80" step="2" value="24" />
+            </label>
+            <label>
+              <span>Sensor H FOV (deg)</span>
+              <input id="horizontalFov" type="number" min="60" max="360" step="5" value="300" />
+            </label>
+            <label>
+              <span>Sensor V FOV (deg)</span>
+              <input id="verticalFov" type="number" min="20" max="120" step="2" value="70" />
+            </label>
+            <label>
+              <span>Sensor range</span>
+              <input id="maxRange" type="number" min="2" max="20" step="0.5" value="9" />
+            </label>
+            <label>
+              <span>Voxel size</span>
+              <input id="voxelSize" type="number" min="0.015" max="0.2" step="0.005" value="0.04" />
+            </label>
+            <label>
+              <span>Dwell / scan interval (ms)</span>
+              <input id="dwellMs" type="number" min="120" max="2200" step="40" value="500" />
+            </label>
+          </div>
+
+          <div class="stats-grid stats-grid--wide">
+            <div class="stat-card">
+              <span>Scans</span>
+              <strong id="scansReadout">0</strong>
+            </div>
+            <div class="stat-card">
+              <span>Coverage</span>
+              <strong id="coverageReadout">0%</strong>
+            </div>
+            <div class="stat-card">
+              <span>Phase</span>
+              <strong id="phaseReadout">Idle</strong>
+            </div>
+            <div class="stat-card">
+              <span>Planner</span>
+              <strong id="plannerReadout">A*</strong>
+            </div>
+            <div class="stat-card">
+              <span>Goal</span>
+              <strong id="goalReadout">0 / 0</strong>
+            </div>
+            <div class="stat-card">
+              <span>Seed</span>
+              <strong id="seedReadout">0</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel graph-panel">
+          <div class="panel-head">
+            <h2>Spatial Scan Graph</h2>
+            <p>Room map, obstacle field, and height coverage</p>
+          </div>
+          <canvas id="orbitCanvas" width="360" height="260"></canvas>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-head">
+            <h2>Mission Log</h2>
+            <p>Realtime autonomy and sensor updates</p>
+          </div>
+          <div id="logWindow" class="log-window"></div>
+        </section>
+      </aside>
+    </div>
+
+    <div id="cloudOverlay" class="cloud-overlay">
+      <div id="cloudHeader" class="cloud-header">
+        <div>
+          <p class="eyebrow">Overlay</p>
+          <h2>Point Cloud Viewer</h2>
+        </div>
+        <div class="overlay-meta">
+          <span id="cloudMeta">0 pts</span>
+        </div>
+      </div>
+      <div id="cloudViewport" class="cloud-viewport"></div>
+    </div>
+  </body>
+</html>
