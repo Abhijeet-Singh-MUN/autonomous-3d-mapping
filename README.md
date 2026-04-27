@@ -22,6 +22,18 @@ src/
     math.js            Shared numeric helpers and seeded RNG
     planner.js         3D graph search over voxel state points
     voxel-grid.js      Voxel graph storage and world/grid transforms
+  swarm/
+    constants.js       Swarm roles, formation modes, terrain classes, AOI types
+    drone-agent.js     Per-drone state container for roles, route, messages, observations
+    communication-graph.js
+                       Range-limited drone-to-drone graph and message delivery model
+    formation-graph.js Adaptive graph formation target generator
+    terrain-classifier.js
+                       Terrain/problem classifier for adaptive behavior
+    task-allocator.js  Utility-based drone-to-task assignment
+    map-fusion.js      Point-cloud tile and replay-log aggregation scaffolding
+    swarm-controller.js
+                       Facade for agents, communication, formation, allocation, fusion
 ```
 
 The simulator now treats the map as a voxel-based state graph. Each grid vertex is a possible drone state point with a known, free, or occupied state. LiDAR ray samples update that graph, the planner scores frontier and inspection goals from the same graph, and collision avoidance uses the live map plus local ray probes.
@@ -33,6 +45,21 @@ Coordinate convention:
 - `layer`: room Y/height axis
 
 This matters because the planner, coverage map, height bands, and collision clearance must all agree on what "up" means.
+
+## Swarm V1 Branch
+
+The `swarm-v1` branch is the active development branch for adaptive multi-drone exploration. The posted single-drone room simulator remains the baseline behavior while the swarm layer is built in modules.
+
+Swarm V1 direction:
+
+- Preserve the current single-drone planner and room workflow.
+- Add configurable swarms of `3..24` drones.
+- Use adaptive graph formations rather than fixed-only formations.
+- Simulate range-limited drone-to-drone communication with latency/dropout hooks.
+- Classify terrain/problem context to choose sparse search, relay, wedge, perimeter, or scatter behavior.
+- Fuse per-drone map and point-cloud observations into dataset-oriented outputs.
+
+Initial swarm modules are scaffolding only; they are not yet wired into the visible simulation UI.
 
 ## Run locally in a normal browser
 
@@ -130,6 +157,11 @@ Catmull-Rom is an interpolating spline: the curve passes through the route waypo
 Use `Export PLY` after a mission to save the current colored point cloud for later reconstruction work.
 
 ## Development Log
+
+### 2026-04-27
+
+- Added initial `swarm-v1` scaffolding modules for drone agents, communication graphs, adaptive formations, task allocation, terrain classification, map fusion, and swarm control.
+- Documented the active swarm branch direction while keeping the current single-drone simulator as the baseline.
 
 ### 2026-04-25
 
