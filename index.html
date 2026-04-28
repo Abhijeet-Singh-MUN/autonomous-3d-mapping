@@ -104,7 +104,7 @@
             </label>
             <label>
               <span>Swarm drones</span>
-              <input id="swarmSize" type="number" min="3" max="24" step="1" value="6" />
+              <input id="swarmSize" type="number" min="3" max="24" step="1" value="24" />
             </label>
             <label>
               <span>Swarm formation</span>
@@ -123,7 +123,7 @@
             </label>
             <label>
               <span>K-nearest comms links</span>
-              <input id="communicationNeighbors" type="number" min="1" max="8" step="1" value="3" />
+              <input id="communicationNeighbors" type="number" min="1" max="8" step="1" value="6" />
             </label>
             <label>
               <span>Link dropout probability</span>
@@ -133,8 +133,8 @@
               <span>Swarm scan density</span>
               <select id="swarmScanDensity">
                 <option value="economy">Economy</option>
-                <option value="light">Light</option>
-                <option value="balanced" selected>Balanced</option>
+                <option value="light" selected>Light</option>
+                <option value="balanced">Balanced</option>
                 <option value="dense">Dense</option>
                 <option value="survey">Survey</option>
                 <option value="max">Max capture</option>
@@ -145,15 +145,15 @@
               <span>Performance budget</span>
               <select id="performanceBudget">
                 <option value="safe">GPU safe</option>
-                <option value="balanced" selected>Balanced</option>
-                <option value="quality">Quality</option>
+                <option value="balanced">Balanced</option>
+                <option value="quality" selected>Quality</option>
                 <option value="capture">Capture</option>
                 <option value="custom">Custom</option>
               </select>
             </label>
             <label>
               <span>Visible point cap</span>
-              <input id="visiblePointBudget" type="number" min="10000" max="300000" step="5000" value="90000" />
+              <input id="visiblePointBudget" type="number" min="10000" max="1200000" step="25000" value="210000" />
             </label>
             <label>
               <span>Render scale cap</span>

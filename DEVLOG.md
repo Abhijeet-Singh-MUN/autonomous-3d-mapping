@@ -110,6 +110,29 @@ This log captures why changes are made, which issues they address, and what they
 - Added viewport keyboard navigation: the hovered sim or point-cloud window accepts `W/A/S/D`, `Q/E`, and `Shift` for faster inspection movement while mouse orbit/zoom still works.
 - Increased practical scan density slightly and added AOI-focused scan cones that activate near selected AOIs, giving structures and object fields more point samples without globally overloading terrain scans.
 - Added AOI return metadata and a high-contrast AOI point-cloud highlight blend so object-capture regions do not visually disappear into the terrain color ramp.
+- Changed viewport keyboard motion from ground-plane panning to camera-relative fly movement, so `W/S` follows the mouse-set viewing angle including altitude.
+- Changed AOI point-cloud highlighting from a mostly uniform tint to an object-scale local gradient based on each point's position around the AOI.
+- Sharpened the AOI color gradient with higher local frequency, stronger saturation, and stronger AOI blending so small object-scale geometry changes produce clearer color changes.
+- Rebalanced the AOI gradient after testing: softer than the sharp pass, but still object-scale instead of map-scale.
+- Changed selected-AOI swarm behavior from stopping at the AOI center to orbiting around the AOI, improving point capture from multiple positions.
+- Reduced the valley object-field prop count while scaling the props up so trucks, tracked silhouettes, and static artifacts are easier to inspect.
+- Added click-to-focus orbit behavior for both the simulation and point-cloud views, so the mouse rotates around the selected local point rather than the whole map center.
+- Updated Swarm V1 defaults to 24 drones, 6 K-nearest comms links, Light scan density, and a higher Quality performance budget.
+- Replaced click-to-focus retargeting with free-look left-drag rotation to remove camera jumps while preserving WASD movement, wheel zoom, and right-drag pan.
+- Softened the global and AOI point-cloud palettes with smoother hue, saturation, and lightness changes for a less harsh visual read.
+- Added velocity smoothing to keyboard camera translation so WASD/QE accelerates and eases out instead of stepping abruptly.
+- Retuned global and AOI point-cloud gradients to make X/Z ground-plane depth and vertical Y height more legible while keeping the palette eye-friendly.
+- Increased the visible point cap path from `300,000` to `1,200,000` so custom high point budgets can actually render more of the cloud when the machine can handle it.
+- Reduced AOI-specific coloring to a light local Z-depth cue only, avoiding circular color artifacts caused by orbiting AOI capture paths.
+- Inverted mouse vertical look direction for the free-look camera controls.
+- Replaced selected-AOI circular orbiting with a directional Z-depth inspection sweep so drones keep moving and collecting without painting circular artifacts.
+- Increased focused AOI scan density only at close range, preserving normal terrain scan cost while improving near-object capture.
+- Retuned AOI coloring to a sharper local Z-only gradient scaled by AOI/object size.
+- Changed the AOI Z-depth gradient to a red-only scale for a clearer object-capture visual cue.
+- Excluded visual AOI marker spheres from LiDAR raycast targets so focused scanning does not over-sample the marker itself.
+- Changed focused AOI rays to aim at distributed local Z-depth sample lanes across the AOI/object field rather than the AOI center point.
+- Expanded AOI focus sampling to more Z-depth lanes with wider X/Y offsets so multiple objects inside an AOI field receive focused rays.
+- Intensified the red AOI Z-depth gradient while keeping the cue strictly local-Z based.
 
 ### Adaptive algorithm design stance
 

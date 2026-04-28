@@ -122,8 +122,8 @@ npm run preview
 
 - The main terrain simulation and point-cloud overlay are both resizable from the lower-right grip.
 - The point-cloud overlay can also be dragged by its header.
-- Both 3D windows use mouse `OrbitControls`: left-drag changes viewing angle, wheel zooms, and right-drag pans.
-- Hover either 3D window and use `W/A/S/D` to pan through the scene, with `Q/E` for down/up and `Shift` for faster movement.
+- Both 3D windows use mouse navigation: left-drag rotates the camera view in place, wheel zooms, and right-drag pans without retargeting the camera.
+- Hover either 3D window and use smoothed camera-relative fly controls: mouse sets viewing direction, `W/S` moves forward/back along that direction, `A/D` strafes, `Q/E` moves down/up, and `Shift` moves faster.
 
 ### Swarm and terrain
 
@@ -135,13 +135,13 @@ npm run preview
 - `Village structures`: changes the number of generated village buildings.
 - `Tree count`: changes generated vegetation density.
 - `Preview voxel resolution`: controls the coarse swarm preview occupancy grid.
-- `Swarm drones`: controls active drone count from `3..24`.
+- `Swarm drones`: controls active drone count from `3..24`; the Swarm V1 default is `24`.
 - `Swarm formation`: selects adaptive graph, scatter, line sweep, wedge, relay chain, or perimeter ring behavior.
 - `Max reliable link distance`: maximum distance for a usable drone-to-drone communication edge.
-- `K-nearest comms links`: target reliable neighbor count for each drone.
+- `K-nearest comms links`: target reliable neighbor count for each drone; the default is `6`.
 - `Link dropout probability`: defaults to `0`; raising it intentionally stress-tests unreliable comms.
 - `Performance budget`: browser-side workload profile. It controls render scale, visible point-cloud cap, scan cadence, point-cloud upload cadence, comm-link redraw cadence, and mission graph redraw cadence.
-- `Visible point cap`: maximum point-cloud samples drawn in the viewport at once. Export still uses the full stored point cloud.
+- `Visible point cap`: maximum point-cloud samples drawn in the viewport at once, up to `1,200,000` in custom mode. Export still uses the full stored point cloud.
 - `Render scale cap`: maximum WebGL pixel ratio used by the simulation and point-cloud canvases.
 - `Safety radius`: minimum collision/clearance envelope used by swarm separation and terrain clearance.
 - `Terrain flight clearance`: target altitude above terrain for cruise and formation targets.
@@ -150,13 +150,14 @@ npm run preview
 
 ### LiDAR and point-cloud capture
 
-- `Swarm scan density`: six-level preset dropdown for per-drone scan fan density: economy, light, balanced, dense, survey, and max capture. `Custom` is selected automatically when ray counts are edited directly.
+- `Swarm scan density`: six-level preset dropdown for per-drone scan fan density: economy, light, balanced, dense, survey, and max capture. The default is `Light`; `Custom` is selected automatically when ray counts are edited directly.
 - `Per-drone H rays`, `Per-drone V rays`: explicit horizontal and vertical ray counts per drone per scan pass.
 - `Sensor H FOV`, `Sensor V FOV`: control the horizontal and vertical scan cone in degrees.
 - `Sensor range`: caps raycast distance and therefore how far free/occupied voxels can be discovered.
 - `Voxel size`: controls point-cloud downsampling size.
 - `Dwell / scan interval`: timing knob retained for mission update cadence.
-- AOI capture adds a focused scan cone when drones approach an AOI, so buildings and valley object fields receive denser point samples without globally increasing every terrain ray.
+- AOI capture adds a focused scan cone only when drones are close to an AOI, so buildings and valley object fields receive denser point samples without globally increasing every terrain ray.
+- AOI focus rays are distributed across wider Z-depth lanes and nearby X/Y offsets inside the AOI/object-field area instead of aiming at the visual AOI marker.
 
 Current limits:
 
@@ -169,8 +170,9 @@ Current limits:
 - The current swarm branch uses coarse preview voxel state for responsiveness while the point cloud records denser samples.
 - LiDAR discovery raycasts against the rendered scene meshes. The terrain height model is only used by the simulator for ground clearance/crash prevention, not as drone knowledge.
 - Point-cloud geometry is flushed in batches: drone observations and global visualization samples are accumulated first, then periodically uploaded to the Three.js `BufferGeometry` used by the visible point cloud.
-- Point-cloud colors use a multi-axis gradient from height, sensor range, confidence, and world position so thin objects, buildings, trees, and poles are easier to distinguish from terrain.
-- AOI-focused returns blend toward a high-contrast highlight palette, making the active object-capture area easier to inspect in the point-cloud overlay and exported PLY colors.
+- Point-cloud colors use a multi-axis gradient from world X/Z position, vertical Y height, sensor range, and confidence so depth and altitude are easier to read.
+- AOI-focused returns use an intensified red local Z-depth highlight scaled by AOI/object size, avoiding circular color artifacts from inspection paths.
+- Visual AOI markers are excluded from LiDAR ray targets, so they do not create artificial hot spots in the point cloud.
 - Performance budgets are simulator-side safety limits, not a true operating-system GPU cap. Browser WebGL does not expose reliable dedicated-GPU utilization control, so the sim manages workload through render scale, visible point cap, redraw cadence, and adaptive frame timing.
 - Every scan pass still includes every active drone. Under heavier budgets, the sim may space scan passes and visual uploads farther apart instead of rotating drones out of sensing.
 - Raycasting uses `three-mesh-bvh` acceleration so all drones can scan without falling back to privileged terrain shortcuts.

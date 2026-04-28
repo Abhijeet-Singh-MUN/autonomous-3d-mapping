@@ -141,7 +141,17 @@ const sim = {
   },
   navigation: {
     activeViewport: 'main',
-    keys: new Set()
+    keys: new Set(),
+    velocity: {
+      main: new THREE.Vector3(),
+      cloud: new THREE.Vector3()
+    },
+    freeLook: {
+      active: false,
+      viewport: 'main',
+      lastX: 0,
+      lastY: 0
+    }
   },
   logs: []
 };
@@ -165,6 +175,7 @@ const cloud = createCloudScene();
 setupUI();
 createPointCloud();
 applySensorPreset(false);
+applySwarmScanDensityPreset();
 regenerateEnvironment(true);
 resetMission(false, true);
 logMessage('Terrain swarm sandbox ready. Drones map the scene from LiDAR observations and maintain reliable neighbor links.');
@@ -185,7 +196,7 @@ function createMainScene() {
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.enableRotate = true;
+  controls.enableRotate = false;
   controls.enablePan = true;
   controls.enableZoom = true;
   controls.screenSpacePanning = true;
@@ -229,6 +240,7 @@ function createMainScene() {
   els.viewport.addEventListener('pointerenter', () => {
     sim.navigation.activeViewport = 'main';
   });
+  setupFreeLookControls(renderer.domElement, 'main');
   renderer.domElement.tabIndex = 0;
   window.addEventListener('resize', resize);
   resize();
@@ -250,7 +262,7 @@ function createCloudScene() {
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.enableRotate = true;
+  controls.enableRotate = false;
   controls.enablePan = true;
   controls.enableZoom = true;
   controls.screenSpacePanning = true;
@@ -284,6 +296,7 @@ function createCloudScene() {
   els.cloudViewport.addEventListener('pointerenter', () => {
     sim.navigation.activeViewport = 'cloud';
   });
+  setupFreeLookControls(renderer.domElement, 'cloud');
   renderer.domElement.tabIndex = 0;
   window.addEventListener('resize', resize);
   resize();
@@ -578,51 +591,51 @@ function performanceBudgetPresets() {
   return {
     safe: {
       label: 'GPU safe',
-      renderScale: 1,
-      visiblePoints: 45000,
-      targetFrameMs: 26,
-      scanIntervalMs: 260,
-      cloudFlushMs: 1400,
-      commRenderMs: 320,
-      graphRenderMs: 320,
-      beamDroneCap: 2,
-      beamSamples: 4
+      renderScale: 1.15,
+      visiblePoints: 65000,
+      targetFrameMs: 24,
+      scanIntervalMs: 235,
+      cloudFlushMs: 1150,
+      commRenderMs: 270,
+      graphRenderMs: 280,
+      beamDroneCap: 3,
+      beamSamples: 5
     },
     balanced: {
       label: 'Balanced',
-      renderScale: 1.35,
-      visiblePoints: 90000,
-      targetFrameMs: 22,
-      scanIntervalMs: 200,
-      cloudFlushMs: 900,
-      commRenderMs: 190,
-      graphRenderMs: 220,
-      beamDroneCap: 4,
-      beamSamples: 5
-    },
-    quality: {
-      label: 'Quality',
-      renderScale: 1.6,
-      visiblePoints: 160000,
+      renderScale: 1.5,
+      visiblePoints: 125000,
       targetFrameMs: 20,
-      scanIntervalMs: 170,
-      cloudFlushMs: 720,
-      commRenderMs: 150,
-      graphRenderMs: 180,
+      scanIntervalMs: 175,
+      cloudFlushMs: 760,
+      commRenderMs: 165,
+      graphRenderMs: 190,
       beamDroneCap: 5,
       beamSamples: 6
     },
+    quality: {
+      label: 'Quality',
+      renderScale: 1.75,
+      visiblePoints: 210000,
+      targetFrameMs: 18,
+      scanIntervalMs: 150,
+      cloudFlushMs: 580,
+      commRenderMs: 125,
+      graphRenderMs: 150,
+      beamDroneCap: 7,
+      beamSamples: 7
+    },
     capture: {
       label: 'Capture',
-      renderScale: 1.15,
-      visiblePoints: 220000,
-      targetFrameMs: 28,
-      scanIntervalMs: 240,
-      cloudFlushMs: 1350,
-      commRenderMs: 280,
-      graphRenderMs: 280,
-      beamDroneCap: 2,
-      beamSamples: 4
+      renderScale: 1.35,
+      visiblePoints: 650000,
+      targetFrameMs: 24,
+      scanIntervalMs: 165,
+      cloudFlushMs: 880,
+      commRenderMs: 220,
+      graphRenderMs: 230,
+      beamDroneCap: 5,
+      beamSamples: 6
     }
   };
 }
@@ -637,7 +650,7 @@ function readPerformanceBudgetConfig() {
   return {
     label: 'Custom',
     renderScale: clamp(readNumber(els.renderScaleBudget), 0.65, 2),
-    visiblePoints: clampInt(readNumber(els.visiblePointBudget), 10000, 300000),
+    visiblePoints: clampInt(readNumber(els.visiblePointBudget), 10000, 1200000),
     targetFrameMs: 24,
     scanIntervalMs: 210,
     cloudFlushMs: 950,
@@ -1067,16 +1080,13 @@ function buildValleyAperture() {
   const group = new THREE.Group();
 
   [
-    [-12.5, -6.2, 'tracked', -0.25],
-    [0.2, -7.4, 'truck', 0.12],
-    [12.4, -5.8, 'tracked', 0.28],
-    [-6.8, 1.2, 'field-artifact', Math.PI * 0.48],
-    [7.8, 1.8, 'truck', -0.35],
-    [-14.4, 7.6, 'truck', 0.62],
-    [0.5, 8.4, 'tracked', -0.58],
-    [14.2, 7.8, 'field-artifact', 0.18],
-    [-7.6, 15.0, 'tracked', 0.42],
-    [8.6, 14.2, 'field-artifact', -0.32]
+    [-10.5, -5.8, 'tracked', -0.25],
+    [4.8, -5.6, 'truck', 0.18],
+    [-3.8, 2.7, 'field-artifact', Math.PI * 0.45],
+    [11.2, 3.4, 'tracked', 0.28],
+    [-11.8, 10.6, 'truck', 0.62],
+    [4.6, 12.2, 'field-artifact', -0.32],
+    [14.2, 10.5, 'truck', -0.35]
   ].forEach(([offsetX, offsetZ, kind, rotation]) => {
     buildStaticSurveyVehicle(group, x + offsetX, z + offsetZ, kind, rotation);
   });
@@ -1096,6 +1106,7 @@ function buildValleyAperture() {
 function buildStaticSurveyVehicle(group, x, z, kind, rotation) {
   const placement = findTerrainPlacement(x, z, kind === 'field-artifact' ? 2.1 : 2.8, 3);
   const y = placement.max;
+  const scale = kind === 'field-artifact' ? 1.32 : kind === 'truck' ? 1.38 : 1.46;
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: kind === 'truck' ? '#68717a' : '#596151', roughness: 0.78, metalness: 0.08 });
   const darkMaterial = new THREE.MeshStandardMaterial({ color: '#22272e', roughness: 0.7, metalness: 0.14 });
   const accentMaterial = new THREE.MeshStandardMaterial({ color: '#8b8371', roughness: 0.74, metalness: 0.08 });
@@ -1146,14 +1157,15 @@ function buildStaticSurveyVehicle(group, x, z, kind, rotation) {
 
   vehicle.position.set(placement.x, y, placement.z);
   vehicle.rotation.y = rotation;
+  vehicle.scale.setScalar(scale);
   group.add(vehicle);
 
   sim.floorFootprints.push({
-    minX: placement.x - 3.2,
-    maxX: placement.x + 3.2,
-    minZ: placement.z - 2.4,
-    maxZ: placement.z + 2.4,
-    height: y + 2.3,
+    minX: placement.x - 3.2 * scale,
+    maxX: placement.x + 3.2 * scale,
+    minZ: placement.z - 2.4 * scale,
+    maxZ: placement.z + 2.4 * scale,
+    height: y + 2.6 * scale,
     type: 'static-object'
   });
 }
@@ -1168,6 +1180,8 @@ function buildAoiMarkers() {
     }
     const marker = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), markerMaterial);
     marker.position.copy(aoi.position);
+    marker.userData.ignoreRaycast = true;
+    marker.userData.aoiMarker = true;
     group.add(marker);
   });
   return group;
@@ -1711,36 +1725,98 @@ function animate(time) {
 }
 
 function updateKeyboardNavigation(deltaSeconds) {
-  if (!sim.navigation.keys.size || deltaSeconds <= 0) {
+  if (deltaSeconds <= 0) {
     return;
   }
 
-  const targetScene = sim.navigation.activeViewport === 'cloud' ? cloud : main;
-  const speed = (sim.navigation.keys.has('shift') ? 52 : 28) * deltaSeconds;
+  const viewportName = sim.navigation.activeViewport === 'cloud' ? 'cloud' : 'main';
+  const targetScene = viewportName === 'cloud' ? cloud : main;
+  const velocity = sim.navigation.velocity[viewportName];
+  const speed = sim.navigation.keys.has('shift') ? 52 : 28;
   const { camera, controls } = targetScene;
-  temp.cameraForward.copy(controls.target).sub(camera.position);
-  temp.cameraForward.y = 0;
-  if (temp.cameraForward.lengthSq() < 1e-6) {
-    camera.getWorldDirection(temp.cameraForward);
-    temp.cameraForward.y = 0;
-  }
+  camera.getWorldDirection(temp.cameraForward);
   temp.cameraForward.normalize();
-  temp.cameraRight.crossVectors(temp.cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+  temp.cameraRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
 
-  const move = new THREE.Vector3();
-  if (sim.navigation.keys.has('w')) move.add(temp.cameraForward);
-  if (sim.navigation.keys.has('s')) move.sub(temp.cameraForward);
-  if (sim.navigation.keys.has('d')) move.add(temp.cameraRight);
-  if (sim.navigation.keys.has('a')) move.sub(temp.cameraRight);
-  if (sim.navigation.keys.has('e')) move.y += 1;
-  if (sim.navigation.keys.has('q')) move.y -= 1;
+  const desired = new THREE.Vector3();
+  if (sim.navigation.keys.has('w')) desired.add(temp.cameraForward);
+  if (sim.navigation.keys.has('s')) desired.sub(temp.cameraForward);
+  if (sim.navigation.keys.has('d')) desired.add(temp.cameraRight);
+  if (sim.navigation.keys.has('a')) desired.sub(temp.cameraRight);
+  if (sim.navigation.keys.has('e')) desired.y += 1;
+  if (sim.navigation.keys.has('q')) desired.y -= 1;
 
-  if (move.lengthSq() < 1e-6) {
+  if (desired.lengthSq() > 1e-6) {
+    desired.normalize().multiplyScalar(speed);
+    velocity.lerp(desired, 1 - Math.exp(-deltaSeconds * 9.5));
+  } else {
+    velocity.multiplyScalar(Math.exp(-deltaSeconds * 8));
+  }
+
+  if (velocity.lengthSq() < 1e-5) {
+    velocity.set(0, 0, 0);
     return;
   }
-  move.normalize().multiplyScalar(speed);
+
+  const move = velocity.clone().multiplyScalar(deltaSeconds);
   camera.position.add(move);
   controls.target.add(move);
+}
+
+function setupFreeLookControls(element, viewportName) {
+  element.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    sim.navigation.activeViewport = viewportName;
+    sim.navigation.freeLook.active = true;
+    sim.navigation.freeLook.viewport = viewportName;
+    sim.navigation.freeLook.lastX = event.clientX;
+    sim.navigation.freeLook.lastY = event.clientY;
+    const targetScene = viewportName === 'cloud' ? cloud : main;
+    targetScene.controls.enabled = false;
+    element.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  element.addEventListener('pointermove', (event) => {
+    if (!sim.navigation.freeLook.active || sim.navigation.freeLook.viewport !== viewportName) {
+      return;
+    }
+    rotateViewFromPointerDelta(event.clientX - sim.navigation.freeLook.lastX, event.clientY - sim.navigation.freeLook.lastY, viewportName);
+    sim.navigation.freeLook.lastX = event.clientX;
+    sim.navigation.freeLook.lastY = event.clientY;
+    event.preventDefault();
+  });
+
+  const stopFreeLook = (event) => {
+    if (!sim.navigation.freeLook.active || sim.navigation.freeLook.viewport !== viewportName) {
+      return;
+    }
+    sim.navigation.freeLook.active = false;
+    const targetScene = viewportName === 'cloud' ? cloud : main;
+    targetScene.controls.enabled = true;
+    if (event.pointerId !== undefined && element.hasPointerCapture(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  element.addEventListener('pointerup', stopFreeLook);
+  element.addEventListener('pointercancel', stopFreeLook);
+  element.addEventListener('pointerleave', stopFreeLook);
+}
+
+function rotateViewFromPointerDelta(deltaX, deltaY, viewportName) {
+  const targetScene = viewportName === 'cloud' ? cloud : main;
+  const { camera, controls } = targetScene;
+  const offset = controls.target.clone().sub(camera.position);
+  const distance = Math.max(offset.length(), 0.001);
+  const spherical = new THREE.Spherical().setFromVector3(offset);
+  spherical.theta -= deltaX * 0.0035;
+  spherical.phi = clamp(spherical.phi + deltaY * 0.0035, 0.05, Math.PI - 0.05);
+  offset.setFromSpherical(spherical).setLength(distance);
+  controls.target.copy(camera.position).add(offset);
+  controls.update();
 }
 
 function updateDrone(deltaSeconds, deltaMs) {
@@ -2453,7 +2529,16 @@ function updateSwarmPreview(deltaSeconds) {
 
 function computeSwarmMissionCenter(activeAois) {
   if (activeAois.length && els.aoiPreset.value !== 'auto') {
-    return terrainAwareTarget(activeAois[0].position);
+    const aoi = activeAois[0];
+    const radius = Math.max(10, aoi.radius ?? 16);
+    const sweepPhase = sim.swarmLaunchElapsedMs * 0.00012 + sim.scanCounter * 0.035;
+    const x = aoi.position.x - radius * 0.34 + Math.sin(sweepPhase * 0.43) * radius * 0.16;
+    const z = aoi.position.z + Math.sin(sweepPhase) * radius * 0.72;
+    const y = Math.max(
+      aoi.position.y + 3.4 + Math.sin(sweepPhase * 0.55) * 2.2,
+      terrainClearanceY(x, z, terrainCruiseClearance())
+    );
+    return terrainAwareTarget(new THREE.Vector3(x, y, z));
   }
 
   const progress = clamp(sim.scanCounter / 180, 0, 1);
@@ -2571,9 +2656,9 @@ function performSwarmSensorPass() {
       }
     });
 
-    const focus = nearestAoiFocus(agent, activeAois, sensorRange);
+    const focus = nearestAoiFocus(agent, activeAois, sensorRange, agentIndex);
     if (focus) {
-      const focusDirections = buildAoiFocusDirections(agent.position, focus.position, focus.strength);
+      const focusDirections = buildAoiFocusDirections(agent.position, focus.focusPoint, focus.strength);
       focusDirections.forEach((direction, directionIndex) => {
         temp.source.copy(agent.position);
         temp.dir.copy(direction).normalize();
@@ -2613,7 +2698,7 @@ function performSwarmSensorPass() {
   renderScanBeams(beams, 'swarm');
 }
 
-function nearestAoiFocus(agent, activeAois, sensorRange) {
+function nearestAoiFocus(agent, activeAois, sensorRange, agentIndex) {
   if (!activeAois.length) {
     return null;
   }
@@ -2621,16 +2706,40 @@ function nearestAoiFocus(agent, activeAois, sensorRange) {
   let best = null;
   activeAois.forEach((aoi) => {
     const distance = agent.position.distanceTo(aoi.position);
-    const focusRange = Math.min(sensorRange * 1.15, 48);
+    const focusRange = Math.min(sensorRange * 0.9, Math.max(18, (aoi.radius ?? 14) * 1.65));
     if (distance > focusRange) {
       return;
     }
-    const strength = clamp(1 - distance / focusRange, 0.18, 1);
+    const strength = clamp(1 - distance / focusRange, 0.08, 1);
     if (!best || strength > best.strength) {
-      best = { ...aoi, distance, strength };
+      best = {
+        ...aoi,
+        distance,
+        strength,
+        focusPoint: aoiDistributedFocusPoint(aoi, agentIndex, sim.scanCounter)
+      };
     }
   });
   return best;
+}
+
+function aoiDistributedFocusPoint(aoi, agentIndex, scanIndex) {
+  const radius = Math.max(6, aoi.radius ?? 14);
+  const laneCount = 11;
+  const lane = (agentIndex * 2 + scanIndex) % laneCount;
+  const zT = laneCount === 1 ? 0.5 : lane / (laneCount - 1);
+  const zOffset = lerp(-radius * 0.92, radius * 0.92, zT);
+  const xLane = ((agentIndex * 5 + scanIndex * 2) % 7) - 3;
+  const xOffset = xLane * radius * 0.16;
+  const yBand = ((agentIndex + scanIndex * 3) % 5) - 2;
+  const yOffset = yBand * radius * 0.06;
+  const x = aoi.position.x + xOffset;
+  const z = aoi.position.z + zOffset;
+  const y = Math.max(
+    aoi.position.y + yOffset,
+    terrainClearanceY(x, z, terrainCruiseClearance() * 0.55)
+  );
+  return new THREE.Vector3(x, y, z);
 }
 
 function buildAoiFocusDirections(source, target, strength) {
@@ -2644,12 +2753,16 @@ function buildAoiFocusDirections(source, target, strength) {
   const up = new THREE.Vector3().crossVectors(right, direction).normalize();
   const rings = [
     { radius: 0, samples: 1 },
-    { radius: 0.035, samples: 6 },
-    { radius: 0.075, samples: 8 },
-    { radius: 0.12, samples: strength > 0.52 ? 10 : 6 }
+    { radius: 0.026, samples: strength > 0.68 ? 8 : 4 },
+    { radius: 0.056, samples: strength > 0.68 ? 10 : 5 },
+    { radius: 0.092, samples: strength > 0.82 ? 14 : strength > 0.5 ? 8 : 4 },
+    { radius: 0.13, samples: strength > 0.86 ? 14 : 0 }
   ];
   const directions = [];
   rings.forEach((ring, ringIndex) => {
+    if (ring.samples <= 0) {
+      return;
+    }
     for (let sample = 0; sample < ring.samples; sample += 1) {
       const angle = (sample / ring.samples) * Math.PI * 2 + ringIndex * 0.37;
       const offset = right.clone().multiplyScalar(Math.cos(angle) * ring.radius).add(
@@ -3016,7 +3129,7 @@ function flushPointCloudGeometry(maxRange) {
   }
   const positions = [];
   const colors = [];
-  const pointBudget = clampInt(readNumber(els.visiblePointBudget), 10000, 300000);
+  const pointBudget = clampInt(readNumber(els.visiblePointBudget), 10000, 1200000);
   const sampleStep = Math.max(1, Math.ceil(sim.voxelMap.size / Math.max(pointBudget, 1)));
   let index = 0;
   let displayedPoints = 0;
@@ -3052,21 +3165,53 @@ function pointCloudColor(point, entry, maxRange) {
   const focusT = THREE.MathUtils.clamp((entry.focusScore ?? 0) / Math.max(entry.count, 1), 0, 1);
   const lateralT = THREE.MathUtils.clamp(point.x / Math.max(sim.room.width, 0.001) + 0.5, 0, 1);
   const depthT = THREE.MathUtils.clamp(point.z / Math.max(sim.room.depth, 0.001) + 0.5, 0, 1);
-  const microVariation = (Math.sin(point.x * 0.43 + point.z * 0.31) + Math.sin(point.y * 0.91 - point.z * 0.17)) * 0.035;
+  const microVariation = (Math.sin(point.x * 0.16 + point.z * 0.22) + Math.sin(point.y * 0.34 - point.z * 0.12)) * 0.018;
   const hue = THREE.MathUtils.euclideanModulo(
-    0.58 - heightT * 0.34 + lateralT * 0.16 - depthT * 0.11 + (1 - distanceT) * 0.08 + microVariation,
+    0.54 - heightT * 0.3 + lateralT * 0.11 - depthT * 0.15 + (1 - distanceT) * 0.055 + microVariation,
     1
   );
-  const saturation = THREE.MathUtils.clamp(0.58 + (1 - distanceT) * 0.28 + Math.abs(lateralT - depthT) * 0.16, 0.48, 0.95);
-  const lightness = THREE.MathUtils.clamp(0.27 + heightT * 0.24 + confidenceT * 0.23 + (1 - distanceT) * 0.08, 0.22, 0.76);
+  const saturation = THREE.MathUtils.clamp(0.54 + (1 - distanceT) * 0.2 + Math.abs(lateralT - depthT) * 0.12, 0.44, 0.84);
+  const lightness = THREE.MathUtils.clamp(0.28 + heightT * 0.3 + confidenceT * 0.17 + depthT * 0.08 + (1 - distanceT) * 0.05, 0.24, 0.74);
   const baseColor = new THREE.Color().setHSL(hue, saturation, lightness);
   if (aoiT <= 0.01 && focusT <= 0.01) {
     return baseColor;
   }
 
-  const focusColor = new THREE.Color().setHSL(0.92 - focusT * 0.06, 0.92, 0.58 + confidenceT * 0.16);
-  const highlightStrength = THREE.MathUtils.clamp(aoiT * 0.62 + focusT * 0.28, 0, 0.82);
+  const focusColor = aoiObjectScaleColor(point, confidenceT, focusT);
+  const highlightStrength = THREE.MathUtils.clamp(aoiT * 0.56 + focusT * 0.18, 0.18, 0.68);
   return baseColor.lerp(focusColor, highlightStrength);
+}
+
+function aoiObjectScaleColor(point, confidenceT, focusT) {
+  const nearest = nearestPointAoi(point);
+  if (!nearest) {
+    return new THREE.Color().setHSL(0.9 - focusT * 0.05, 0.9, 0.58 + confidenceT * 0.16);
+  }
+
+  const radius = Math.max(nearest.radius ?? 14, 1);
+  const localZ = clamp((point.z - nearest.position.z) / radius, -1, 1);
+  const localDepth = (localZ + 1) * 0.5;
+  const sharpDepth = THREE.MathUtils.smoothstep(localDepth, 0.02, 0.98);
+  const band = Math.sin(localZ * Math.PI * 5.4) * 0.035;
+  const hue = THREE.MathUtils.euclideanModulo(0.0 + band * 0.08, 1);
+  const saturation = THREE.MathUtils.clamp(0.82 + focusT * 0.1 + sharpDepth * 0.1, 0.72, 1);
+  const lightness = THREE.MathUtils.clamp(0.2 + sharpDepth * 0.52 + confidenceT * 0.06, 0.18, 0.8);
+  return new THREE.Color().setHSL(hue, saturation, lightness);
+}
+
+function nearestPointAoi(point) {
+  let best = null;
+  sim.aoiTargets.forEach((aoi) => {
+    const radius = aoi.radius ?? 14;
+    const distance = point.distanceTo(aoi.position);
+    if (distance > radius * 1.45) {
+      return;
+    }
+    if (!best || distance < best.distance) {
+      best = { ...aoi, distance };
+    }
+  });
+  return best;
 }
 
 function drawMissionGraph() {
@@ -3378,7 +3523,7 @@ function rotatedSize(width, depth, rotation) {
 function collectMeshes(group) {
   const meshes = [];
   group.traverse((child) => {
-    if (child.isMesh) {
+    if (child.isMesh && !child.userData.ignoreRaycast) {
       meshes.push(child);
     }
   });
