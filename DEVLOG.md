@@ -145,3 +145,12 @@ This log captures why changes are made, which issues they address, and what they
   - Formation topology changes in 3D from those signals.
   - Smooth motion converts graph targets into curves and constrained trajectories.
 - Voxel planning remains useful for state-space reasoning, but the visible drone motion should be smooth, adaptive, and constraint-aware.
+
+### Performance and continuity milestone
+
+- Added `ARCHITECTURE.md` to document the current module layout, runtime data flow, bottlenecks, future extraction targets, and non-regression rules before the custom swarm behavior kernel begins.
+- Added `SESSION_HANDOFF.md` so future sessions can recover branch state, run commands, current defaults, warnings, and the next milestone order without relying only on chat context.
+- Added top-bar performance diagnostics for FPS/frame time, scan pass time, rays per pass, hit count, point-cloud flush time, visible point count, and active budget context.
+- Reworked visible point-cloud flushing to reuse typed-array buffers and `BufferGeometry` draw ranges instead of rebuilding fresh arrays and attributes on every visual upload.
+- Cached swarm scan direction fans by ray count and FOV so Dense/Survey passes spend less time recreating identical direction vectors.
+- Preserved the swarm sensing contract: every drone still scans on each scan pass; the optimization targets buffer/upload/allocation cost rather than skipping agents.

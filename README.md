@@ -61,6 +61,8 @@ Swarm V1 direction:
 Current Swarm V1 preview:
 
 - `Mission mode` is now fixed to `Swarm V1 preview` on this branch. The single-drone baseline remains preserved on `main`.
+- `ARCHITECTURE.md` documents the current module layout, runtime data flow, bottlenecks, extraction targets, and non-regression rules.
+- `SESSION_HANDOFF.md` is the starting point for future chats/sessions, with branch state, run commands, current defaults, and next milestone order.
 - Terrain generation controls shape the mountain-valley sandbox directly.
 - `AOI preset` selects autonomous AOIs or a specific village, complex building, or aperture focus target before mission start.
 - `Swarm drones` configures the visible drone count from `3..24`.
@@ -141,6 +143,7 @@ npm run preview
 - `K-nearest comms links`: target reliable neighbor count for each drone; the default is `6`.
 - `Link dropout probability`: defaults to `0`; raising it intentionally stress-tests unreliable comms.
 - `Performance budget`: browser-side workload profile. It controls render scale, visible point-cloud cap, scan cadence, point-cloud upload cadence, comm-link redraw cadence, and mission graph redraw cadence.
+- Top-bar diagnostics show FPS/frame time, scan pass cost, rays/hits per pass, and point-cloud flush time so Dense/Survey tuning is based on measured bottlenecks.
 - `Visible point cap`: maximum point-cloud samples drawn in the viewport at once, up to `1,200,000` in custom mode. Export still uses the full stored point cloud.
 - `Render scale cap`: maximum WebGL pixel ratio used by the simulation and point-cloud canvases.
 - `Safety radius`: minimum collision/clearance envelope used by swarm separation and terrain clearance.
@@ -170,6 +173,8 @@ Current limits:
 - The current swarm branch uses coarse preview voxel state for responsiveness while the point cloud records denser samples.
 - LiDAR discovery raycasts against the rendered scene meshes. The terrain height model is only used by the simulator for ground clearance/crash prevention, not as drone knowledge.
 - Point-cloud geometry is flushed in batches: drone observations and global visualization samples are accumulated first, then periodically uploaded to the Three.js `BufferGeometry` used by the visible point cloud.
+- The visible point cloud now reuses typed-array buffers and draw ranges instead of rebuilding fresh JavaScript arrays and geometry attributes every flush.
+- Per-density/FOV scan direction sets are cached, reducing repeated allocation during LiDAR passes.
 - Point-cloud colors use a multi-axis gradient from world X/Z position, vertical Y height, sensor range, and confidence so depth and altitude are easier to read.
 - AOI-focused returns use an intensified red local Z-depth highlight scaled by AOI/object size, avoiding circular color artifacts from inspection paths.
 - Visual AOI markers are excluded from LiDAR ray targets, so they do not create artificial hot spots in the point cloud.

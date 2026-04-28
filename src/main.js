@@ -72,6 +72,8 @@ const els = {
   formationReadout: document.querySelector('#formationReadout'),
   commsReadout: document.querySelector('#commsReadout'),
   budgetReadout: document.querySelector('#budgetReadout'),
+  perfReadout: document.querySelector('#perfReadout'),
+  scanPerfReadout: document.querySelector('#scanPerfReadout'),
   cloudMeta: document.querySelector('#cloudMeta')
 };
 
@@ -137,7 +139,21 @@ const sim = {
     loadScale: 1,
     renderScaleElapsedMs: 0,
     currentRenderScale: 1,
-    displayedPointCount: 0
+    displayedPointCount: 0,
+    scanPassMs: 0,
+    lastScanRayCount: 0,
+    lastScanHits: 0,
+    lastCloudFlushMs: 0,
+    cloudBufferCapacity: 0
+  },
+  scanDirectionCache: {
+    key: '',
+    directions: []
+  },
+  pointCloudBuffer: {
+    positions: new Float32Array(0),
+    colors: new Float32Array(0),
+    capacity: 0
   },
   navigation: {
     activeViewport: 'main',
@@ -1607,8 +1623,14 @@ function clearPointCloud() {
   sim.pointCount = 0;
   sim.cloudDirty = false;
   sim.performance.displayedPointCount = 0;
+  sim.performance.lastCloudFlushMs = 0;
+  sim.pointCloudBuffer.positions = new Float32Array(0);
+  sim.pointCloudBuffer.colors = new Float32Array(0);
+  sim.pointCloudBuffer.capacity = 0;
+  sim.performance.cloudBufferCapacity = 0;
   sim.cloudGeometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
   sim.cloudGeometry.setAttribute('color', new THREE.Float32BufferAttribute([], 3));
+  sim.cloudGeometry.setDrawRange(0, 0);
   sim.cloudGeometry.computeBoundingSphere();
   sim.cloudMaterial.size = Math.max(0.028, clamp(readNumber(els.voxelSize), 0.015, 0.2) * 1.18);
   updatePointReadouts();
@@ -2623,22 +2645,27 @@ function performSwarmSensorPass() {
     return;
   }
 
+  const passStart = performance.now();
   const budget = readPerformanceBudgetConfig();
   const beams = [];
   const directions = buildSwarmScanDirections();
   const activeAois = selectedAoiTargets();
   const sensorRange = Math.max(38, clamp(readNumber(els.maxRange), 2, 80));
+  let rayCount = 0;
+  let hitCount = 0;
 
   agents.forEach((agent, agentIndex) => {
     let hits = 0;
     directions.forEach((direction, directionIndex) => {
       temp.source.copy(agent.position);
       temp.dir.copy(direction).normalize();
+      rayCount += 1;
       const hit = castSwarmRay(temp.source, temp.dir, sensorRange);
       if (!hit) {
         return;
       }
       hits += 1;
+      hitCount += 1;
       const metadata = pointAoiMetadata(hit.point, activeAois, false);
       addPointToCloud(hit.point, hit.distance, metadata);
       agent.recordPointObservation({
@@ -2662,11 +2689,13 @@ function performSwarmSensorPass() {
       focusDirections.forEach((direction, directionIndex) => {
         temp.source.copy(agent.position);
         temp.dir.copy(direction).normalize();
+        rayCount += 1;
         const hit = castSwarmRay(temp.source, temp.dir, sensorRange);
         if (!hit) {
           return;
         }
         hits += 1;
+        hitCount += 1;
         const metadata = pointAoiMetadata(hit.point, [focus], true);
         addPointToCloud(hit.point, hit.distance, metadata);
         agent.recordPointObservation({
@@ -2694,6 +2723,9 @@ function performSwarmSensorPass() {
     });
   });
 
+  sim.performance.scanPassMs = performance.now() - passStart;
+  sim.performance.lastScanRayCount = rayCount;
+  sim.performance.lastScanHits = hitCount;
   sim.scanCounter += 1;
   renderScanBeams(beams, 'swarm');
 }
@@ -2777,8 +2809,15 @@ function buildAoiFocusDirections(source, target, strength) {
 function buildSwarmScanDirections() {
   const horizontalCount = clampInt(readNumber(els.horizontalRays), 4, 48);
   const verticalCount = clampInt(readNumber(els.verticalRays), 2, 16);
-  const horizontalFov = THREE.MathUtils.degToRad(clamp(readNumber(els.horizontalFov), 90, 360));
-  const verticalFov = THREE.MathUtils.degToRad(clamp(readNumber(els.verticalFov), 30, 120));
+  const horizontalFovDeg = clamp(readNumber(els.horizontalFov), 90, 360);
+  const verticalFovDeg = clamp(readNumber(els.verticalFov), 30, 120);
+  const cacheKey = `${horizontalCount}:${verticalCount}:${horizontalFovDeg}:${verticalFovDeg}`;
+  if (sim.scanDirectionCache.key === cacheKey) {
+    return sim.scanDirectionCache.directions;
+  }
+
+  const horizontalFov = THREE.MathUtils.degToRad(horizontalFovDeg);
+  const verticalFov = THREE.MathUtils.degToRad(verticalFovDeg);
   const directions = [new THREE.Vector3(0, -1, 0)];
 
   for (let v = 0; v < verticalCount; v += 1) {
@@ -2795,6 +2834,8 @@ function buildSwarmScanDirections() {
     }
   }
 
+  sim.scanDirectionCache.key = cacheKey;
+  sim.scanDirectionCache.directions = directions;
   return directions;
 }
 
@@ -3123,14 +3164,31 @@ function updatePointReadouts() {
       : `${total.toLocaleString()} pts`;
 }
 
+function ensurePointCloudBufferCapacity(pointCount) {
+  if (sim.pointCloudBuffer.capacity >= pointCount) {
+    return;
+  }
+
+  const nextCapacity = Math.max(1024, Math.ceil(pointCount * 1.18));
+  sim.pointCloudBuffer.positions = new Float32Array(nextCapacity * 3);
+  sim.pointCloudBuffer.colors = new Float32Array(nextCapacity * 3);
+  sim.pointCloudBuffer.capacity = nextCapacity;
+  sim.performance.cloudBufferCapacity = nextCapacity;
+  sim.cloudGeometry.setAttribute('position', new THREE.BufferAttribute(sim.pointCloudBuffer.positions, 3));
+  sim.cloudGeometry.setAttribute('color', new THREE.BufferAttribute(sim.pointCloudBuffer.colors, 3));
+}
+
 function flushPointCloudGeometry(maxRange) {
   if (!sim.cloudDirty && sim.pointCount > 0) {
     return;
   }
-  const positions = [];
-  const colors = [];
+  const flushStart = performance.now();
   const pointBudget = clampInt(readNumber(els.visiblePointBudget), 10000, 1200000);
   const sampleStep = Math.max(1, Math.ceil(sim.voxelMap.size / Math.max(pointBudget, 1)));
+  const targetVisibleCount = Math.ceil(sim.voxelMap.size / sampleStep);
+  ensurePointCloudBufferCapacity(targetVisibleCount);
+  const positions = sim.pointCloudBuffer.positions;
+  const colors = sim.pointCloudBuffer.colors;
   let index = 0;
   let displayedPoints = 0;
 
@@ -3142,17 +3200,33 @@ function flushPointCloudGeometry(maxRange) {
     }
 
     temp.worldPoint.copy(entry.sum).multiplyScalar(1 / entry.count);
-    positions.push(temp.worldPoint.x, temp.worldPoint.y, temp.worldPoint.z);
-    displayedPoints += 1;
+    const bufferIndex = displayedPoints * 3;
+    positions[bufferIndex] = temp.worldPoint.x;
+    positions[bufferIndex + 1] = temp.worldPoint.y;
+    positions[bufferIndex + 2] = temp.worldPoint.z;
 
     const color = pointCloudColor(temp.worldPoint, entry, maxRange);
-    colors.push(color.r, color.g, color.b);
+    colors[bufferIndex] = color.r;
+    colors[bufferIndex + 1] = color.g;
+    colors[bufferIndex + 2] = color.b;
+    displayedPoints += 1;
   });
 
-  sim.cloudGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  sim.cloudGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  sim.cloudGeometry.computeBoundingSphere();
+  const positionAttribute = sim.cloudGeometry.getAttribute('position');
+  const colorAttribute = sim.cloudGeometry.getAttribute('color');
+  if (positionAttribute) {
+    positionAttribute.needsUpdate = true;
+  }
+  if (colorAttribute) {
+    colorAttribute.needsUpdate = true;
+  }
+  sim.cloudGeometry.setDrawRange(0, displayedPoints);
+  sim.cloudGeometry.boundingSphere = new THREE.Sphere(
+    new THREE.Vector3(0, sim.room.height * 0.42, 0),
+    Math.max(sim.room.width, sim.room.depth, sim.room.height) * 0.9
+  );
   sim.performance.displayedPointCount = displayedPoints;
+  sim.performance.lastCloudFlushMs = performance.now() - flushStart;
   updatePointReadouts();
   sim.cloudDirty = false;
 }
@@ -3350,6 +3424,10 @@ function refreshStatus() {
   const budget = readPerformanceBudgetConfig();
   const fps = Math.round(1000 / Math.max(sim.performance.frameAvgMs, 1));
   els.budgetReadout.textContent = `${budget.label} ${fps} fps`;
+  els.perfReadout.textContent =
+    `${fps} fps / ${sim.performance.frameAvgMs.toFixed(1)} ms frame / ${sim.performance.lastCloudFlushMs.toFixed(1)} ms cloud`;
+  els.scanPerfReadout.textContent =
+    `${sim.performance.scanPassMs.toFixed(1)} ms / ${sim.performance.lastScanRayCount.toLocaleString()} rays / ${sim.performance.lastScanHits.toLocaleString()} hits`;
 
   const total = sim.mapper ? sim.mapper.states.length : 1;
   const coverage = sim.mapper ? Math.round((sim.mapper.knownCount / Math.max(total, 1)) * 100) : 0;
