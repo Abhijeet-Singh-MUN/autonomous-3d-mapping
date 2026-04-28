@@ -36,7 +36,8 @@ export const DEFAULT_SWARM_CONFIG = {
   minDrones: 3,
   maxDrones: 24,
   communicationRange: 8,
-  communicationDropout: 0.04,
+  maxNeighbors: 3,
+  communicationDropout: 0,
   communicationLatencyMs: 120,
   formationMode: FORMATION_MODES.ADAPTIVE,
   spacing: 1.8

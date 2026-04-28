@@ -1,6 +1,7 @@
 export class CommunicationGraph {
-  constructor({ range, dropout = 0, latencyMs = 0, rng = Math.random }) {
+  constructor({ range, maxNeighbors = 3, dropout = 0, latencyMs = 0, rng = Math.random }) {
     this.range = range;
+    this.maxNeighbors = maxNeighbors;
     this.dropout = dropout;
     this.latencyMs = latencyMs;
     this.rng = rng;
@@ -11,18 +12,33 @@ export class CommunicationGraph {
     this.links.clear();
     agents.forEach((agent) => this.links.set(agent.id, []));
 
+    const candidates = [];
     for (let a = 0; a < agents.length; a += 1) {
       for (let b = a + 1; b < agents.length; b += 1) {
-        const first = agents[a];
-        const second = agents[b];
-        const distance = first.position.distanceTo(second.position);
-        const dropped = this.dropout > 0 && this.rng() < this.dropout;
-        if (distance <= this.range && !dropped) {
-          this.links.get(first.id).push({ id: second.id, distance });
-          this.links.get(second.id).push({ id: first.id, distance });
+        const distance = agents[a].position.distanceTo(agents[b].position);
+        if (distance <= this.range) {
+          candidates.push({
+            from: agents[a].id,
+            to: agents[b].id,
+            distance
+          });
         }
       }
     }
+
+    candidates
+      .sort((a, b) => a.distance - b.distance)
+      .forEach((edge) => {
+        if (this.links.get(edge.from).length >= this.maxNeighbors || this.links.get(edge.to).length >= this.maxNeighbors) {
+          return;
+        }
+        if (this.dropout > 0 && this.rng() < this.dropout) {
+          return;
+        }
+
+        this.links.get(edge.from).push({ id: edge.to, distance: edge.distance });
+        this.links.get(edge.to).push({ id: edge.from, distance: edge.distance });
+      });
 
     return this.snapshot();
   }

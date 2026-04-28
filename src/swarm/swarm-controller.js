@@ -14,6 +14,7 @@ export class SwarmController {
     this.agents = [];
     this.communicationGraph = new CommunicationGraph({
       range: this.config.communicationRange,
+      maxNeighbors: this.config.maxNeighbors,
       dropout: this.config.communicationDropout,
       latencyMs: this.config.communicationLatencyMs
     });
@@ -35,7 +36,16 @@ export class SwarmController {
     const safeCount = clampInt(count, this.config.minDrones, this.config.maxDrones);
     const roles = this.rolePlan(safeCount);
     this.agents = Array.from({ length: safeCount }, (_, index) => {
-      const position = origin.clone().add(new THREE.Vector3((index % 4) * 0.55, 0, Math.floor(index / 4) * 0.55));
+      const columns = Math.ceil(Math.sqrt(safeCount));
+      const rows = Math.ceil(safeCount / columns);
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      const spawnSpacing = Math.max(this.config.spacing * 0.9, 1.2);
+      const position = origin.clone().add(new THREE.Vector3(
+        (col - (columns - 1) * 0.5) * spawnSpacing,
+        0,
+        (row - (rows - 1) * 0.5) * spawnSpacing
+      ));
       return new DroneAgent({
         id: `drone-${index + 1}`,
         role: roles[index],
@@ -101,7 +111,8 @@ export class SwarmController {
       agents: this.agents,
       center,
       heading,
-      radius
+      radius,
+      verticalSpan: this.config.verticalSpan ?? 2
     });
   }
 

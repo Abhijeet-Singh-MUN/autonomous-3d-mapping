@@ -7,6 +7,7 @@ export class DroneAgent {
     this.role = role;
     this.mesh = mesh;
     this.position = position.clone();
+    this.launchPosition = position.clone();
     this.velocity = new THREE.Vector3();
     this.assignment = null;
     this.currentGoal = null;
@@ -22,6 +23,10 @@ export class DroneAgent {
       replans: 0,
       distanceTraveled: 0
     };
+
+    if (this.mesh) {
+      this.mesh.position.copy(this.position);
+    }
   }
 
   setRole(role) {
@@ -29,6 +34,8 @@ export class DroneAgent {
   }
 
   setPosition(position) {
+    this.velocity.copy(position).sub(this.position);
+    this.metrics.distanceTraveled += this.velocity.length();
     this.position.copy(position);
     if (this.mesh) {
       this.mesh.position.copy(position);
@@ -66,6 +73,7 @@ export class DroneAgent {
       role: this.role,
       status: this.status,
       position: this.position.toArray(),
+      launchPosition: this.launchPosition.toArray(),
       assignment: this.assignment,
       metrics: { ...this.metrics }
     };

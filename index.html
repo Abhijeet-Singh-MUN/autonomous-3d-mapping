@@ -36,7 +36,7 @@
         <section class="panel controls-panel">
           <div class="panel-head">
             <h2>Mission Controls</h2>
-            <p>Room generation, autonomy, and LiDAR configuration</p>
+            <p>Swarm autonomy, network, and terrain LiDAR configuration</p>
           </div>
 
           <div class="button-row button-row--wide">
@@ -44,12 +44,72 @@
             <button id="pauseBtn">Pause</button>
             <button id="continueBtn">Continue</button>
             <button id="resetBtn">Reset</button>
-            <button id="randomizeBtn">Randomize Room</button>
+            <button id="randomizeBtn">Randomize Terrain</button>
             <button id="exportBtn">Export PLY</button>
           </div>
 
           <div class="control-grid">
+            <label hidden>
+              <span>Mission mode</span>
+              <select id="missionMode" disabled>
+                <option value="swarm">Swarm V1 preview</option>
+              </select>
+            </label>
+            <label hidden>
+              <span>Environment mode</span>
+              <select id="environmentMode">
+                <option value="terrain" selected>Mountain valley sandbox</option>
+              </select>
+            </label>
             <label>
+              <span>AOI preset</span>
+              <select id="aoiPreset">
+                <option value="auto">Auto terrain AOIs</option>
+                <option value="village">Village cluster</option>
+                <option value="tower">Relay tower</option>
+                <option value="aperture">Valley aperture</option>
+              </select>
+            </label>
+            <label>
+              <span>Swarm drones</span>
+              <input id="swarmSize" type="number" min="3" max="24" step="1" value="6" />
+            </label>
+            <label>
+              <span>Swarm formation</span>
+              <select id="swarmFormation">
+                <option value="adaptive">Adaptive graph</option>
+                <option value="scatter">Scatter</option>
+                <option value="line_sweep">Line sweep</option>
+                <option value="wedge">Wedge</option>
+                <option value="relay_chain">Relay chain</option>
+                <option value="perimeter_ring">Perimeter ring</option>
+              </select>
+            </label>
+            <label>
+              <span>Max reliable link distance</span>
+              <input id="communicationRange" type="number" min="2" max="80" step="0.5" value="28" />
+            </label>
+            <label>
+              <span>K-nearest comms links</span>
+              <input id="communicationNeighbors" type="number" min="1" max="8" step="1" value="3" />
+            </label>
+            <label>
+              <span>Link dropout probability</span>
+              <input id="communicationDropout" type="number" min="0" max="0.45" step="0.01" value="0" />
+            </label>
+            <label>
+              <span>Swarm scan density</span>
+              <select id="swarmScanDensity">
+                <option value="economy">Economy</option>
+                <option value="light">Light</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="dense">Dense</option>
+                <option value="survey">Survey</option>
+                <option value="max">Max capture</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label hidden>
               <span>Room preset</span>
               <select id="roomPreset">
                 <option value="mixed">Mixed room</option>
@@ -57,14 +117,14 @@
                 <option value="bedroom">Bedroom</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Scan mode</span>
               <select id="scanMode">
                 <option value="stepped">Stepped</option>
                 <option value="continuous">Continuous</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Sensor preset</span>
               <select id="sensorPreset">
                 <option value="spinning">Spinning LiDAR</option>
@@ -73,7 +133,7 @@
                 <option value="custom">Custom</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Planner</span>
               <select id="plannerMode">
                 <option value="astar">A*</option>
@@ -81,7 +141,7 @@
                 <option value="greedy">Greedy best-first</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Steering style</span>
               <select id="pathStyle">
                 <option value="hybrid">Hybrid</option>
@@ -89,34 +149,34 @@
                 <option value="curved">Curved</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Ceiling obstacle</span>
               <select id="ceilingObstacles">
                 <option value="on">On</option>
                 <option value="off">Off</option>
               </select>
             </label>
-            <label>
+            <label hidden>
               <span>Room width</span>
               <input id="roomWidth" type="number" min="5" max="14" step="0.5" value="8.5" />
             </label>
-            <label>
+            <label hidden>
               <span>Room depth</span>
               <input id="roomDepth" type="number" min="5" max="14" step="0.5" value="7.5" />
             </label>
-            <label>
+            <label hidden>
               <span>Room height</span>
               <input id="roomHeight" type="number" min="2.6" max="5" step="0.1" value="3.3" />
             </label>
-            <label>
+            <label hidden>
               <span>Furniture count</span>
               <input id="furnitureCount" type="number" min="3" max="14" step="1" value="7" />
             </label>
-            <label>
+            <label hidden>
               <span>Vertical seed levels</span>
               <input id="heightBands" type="number" min="2" max="8" step="1" value="4" />
             </label>
-            <label>
+            <label hidden>
               <span>Bootstrap scans</span>
               <input id="bootstrapScans" type="number" min="1" max="12" step="1" value="6" />
             </label>
@@ -124,11 +184,11 @@
               <span>Safety radius</span>
               <input id="safetyRadius" type="number" min="0.2" max="1.4" step="0.05" value="0.42" />
             </label>
-            <label>
+            <label hidden>
               <span>Goal reach radius</span>
               <input id="goalReachRadius" type="number" min="0.1" max="0.9" step="0.05" value="0.28" />
             </label>
-            <label>
+            <label hidden>
               <span>Voxel resolution</span>
               <input id="gridSize" type="number" min="0.45" max="1.6" step="0.05" value="0.9" />
             </label>
@@ -137,12 +197,12 @@
               <input id="moveSpeed" type="number" min="0.2" max="4" step="0.1" value="1.35" />
             </label>
             <label>
-              <span>Horizontal rays</span>
-              <input id="horizontalRays" type="number" min="24" max="180" step="6" value="72" />
+              <span>Per-drone H rays</span>
+              <input id="horizontalRays" type="number" min="4" max="48" step="1" value="12" />
             </label>
             <label>
-              <span>Vertical rays</span>
-              <input id="verticalRays" type="number" min="8" max="80" step="2" value="24" />
+              <span>Per-drone V rays</span>
+              <input id="verticalRays" type="number" min="2" max="16" step="1" value="4" />
             </label>
             <label>
               <span>Sensor H FOV (deg)</span>
@@ -154,7 +214,7 @@
             </label>
             <label>
               <span>Sensor range</span>
-              <input id="maxRange" type="number" min="2" max="20" step="0.5" value="9" />
+              <input id="maxRange" type="number" min="2" max="80" step="0.5" value="18" />
             </label>
             <label>
               <span>Voxel size</span>
@@ -179,11 +239,11 @@
               <span>Phase</span>
               <strong id="phaseReadout">Idle</strong>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" hidden>
               <span>Planner</span>
               <strong id="plannerReadout">A*</strong>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" hidden>
               <span>Goal</span>
               <strong id="goalReadout">0 / 0</strong>
             </div>
@@ -191,13 +251,25 @@
               <span>Seed</span>
               <strong id="seedReadout">0</strong>
             </div>
+            <div class="stat-card">
+              <span>Swarm</span>
+              <strong id="swarmReadout">Off</strong>
+            </div>
+            <div class="stat-card">
+              <span>Formation</span>
+              <strong id="formationReadout">Adaptive</strong>
+            </div>
+            <div class="stat-card">
+              <span>Comms</span>
+              <strong id="commsReadout">0 links</strong>
+            </div>
           </div>
         </section>
 
         <section class="panel graph-panel">
           <div class="panel-head">
             <h2>Spatial Scan Graph</h2>
-            <p>Room map, obstacle field, and height coverage</p>
+            <p>Swarm map, obstacle field, and coverage</p>
           </div>
           <canvas id="orbitCanvas" width="360" height="260"></canvas>
         </section>

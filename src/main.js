@@ -1,10 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import './styles.css';
 import { CELL_FREE, CELL_OCCUPIED, CELL_UNKNOWN, SENSOR_PRESETS } from './core/constants.js';
 import { VoxelGrid } from './core/voxel-grid.js';
 import { searchPath3D as runVoxelPlanner } from './core/planner.js';
 import { almostEqual, clamp, clampInt, createRng, generateSeed, lerp, readNumber } from './core/math.js';
+import { FORMATION_MODES, SwarmController } from './swarm/index.js';
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const els = {
   viewport: document.querySelector('#sceneViewport'),
@@ -19,6 +25,15 @@ const els = {
   resetBtn: document.querySelector('#resetBtn'),
   randomizeBtn: document.querySelector('#randomizeBtn'),
   exportBtn: document.querySelector('#exportBtn'),
+  missionMode: document.querySelector('#missionMode'),
+  environmentMode: document.querySelector('#environmentMode'),
+  aoiPreset: document.querySelector('#aoiPreset'),
+  swarmSize: document.querySelector('#swarmSize'),
+  swarmFormation: document.querySelector('#swarmFormation'),
+  communicationRange: document.querySelector('#communicationRange'),
+  communicationNeighbors: document.querySelector('#communicationNeighbors'),
+  communicationDropout: document.querySelector('#communicationDropout'),
+  swarmScanDensity: document.querySelector('#swarmScanDensity'),
   roomPreset: document.querySelector('#roomPreset'),
   scanMode: document.querySelector('#scanMode'),
   sensorPreset: document.querySelector('#sensorPreset'),
@@ -51,6 +66,9 @@ const els = {
   plannerReadout: document.querySelector('#plannerReadout'),
   goalReadout: document.querySelector('#goalReadout'),
   seedReadout: document.querySelector('#seedReadout'),
+  swarmReadout: document.querySelector('#swarmReadout'),
+  formationReadout: document.querySelector('#formationReadout'),
+  commsReadout: document.querySelector('#commsReadout'),
   cloudMeta: document.querySelector('#cloudMeta')
 };
 
@@ -68,6 +86,8 @@ const sim = {
   scanTargets: [],
   floorFootprints: [],
   ceilingHazard: null,
+  aoiTargets: [],
+  terrainProfile: null,
   mapper: null,
   scanCounter: 0,
   pointCount: 0,
@@ -98,6 +118,14 @@ const sim = {
     vertexColors: true
   }),
   overlayCloud: null,
+  swarmController: null,
+  swarmTargets: [],
+  swarmSnapshot: null,
+  swarmLaunchElapsedMs: 0,
+  swarmScanElapsedMs: 0,
+  commsRenderElapsedMs: 0,
+  cloudFlushElapsedMs: 0,
+  cloudDirty: false,
   voxelMap: new Map(),
   logs: []
 };
@@ -129,7 +157,7 @@ function createMainScene() {
   scene.background = new THREE.Color('#08111d');
   scene.fog = new THREE.Fog('#08111d', 14, 38);
 
-  const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 140);
+  const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 900);
   camera.position.set(8.5, 6.4, 9.4);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -154,7 +182,9 @@ function createMainScene() {
   const roomGroup = new THREE.Group();
   const pathGroup = new THREE.Group();
   const beamGroup = new THREE.Group();
-  scene.add(roomGroup, pathGroup, beamGroup);
+  const swarmGroup = new THREE.Group();
+  const commGroup = new THREE.Group();
+  scene.add(roomGroup, pathGroup, beamGroup, commGroup, swarmGroup);
 
   const drone = createDroneMesh();
   scene.add(drone);
@@ -171,14 +201,14 @@ function createMainScene() {
   window.addEventListener('resize', resize);
   resize();
 
-  return { scene, camera, renderer, controls, roomGroup, pathGroup, beamGroup, drone };
+  return { scene, camera, renderer, controls, roomGroup, pathGroup, beamGroup, swarmGroup, commGroup, drone };
 }
 
 function createCloudScene() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#060a12');
 
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 160);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 900);
   camera.position.set(6, 5, 6);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -196,7 +226,8 @@ function createCloudScene() {
   fill.position.set(6, 8, 5);
   scene.add(fill);
 
-  scene.add(new THREE.GridHelper(16, 32, '#5176af', '#1e2f49'));
+  const grid = new THREE.GridHelper(16, 32, '#5176af', '#1e2f49');
+  scene.add(grid);
   scene.add(new THREE.AxesHelper(1.8));
 
   const resize = () => {
@@ -211,7 +242,7 @@ function createCloudScene() {
   window.addEventListener('resize', resize);
   resize();
 
-  return { scene, camera, renderer, controls };
+  return { scene, camera, renderer, controls, grid };
 }
 
 function createDroneMesh() {
@@ -258,6 +289,26 @@ function createDroneMesh() {
   return drone;
 }
 
+function createSwarmDroneMesh(role, index) {
+  const drone = createDroneMesh();
+  const color = roleColor(role);
+  drone.traverse((child) => {
+    if (!child.isMesh || !child.material) {
+      return;
+    }
+    child.material = child.material.clone();
+    if (child.material.color) {
+      child.material.color.set(index === 0 ? '#f4f8ff' : color);
+    }
+  });
+  drone.scale.setScalar(0.82);
+  if (els.environmentMode.value === 'terrain') {
+    drone.scale.setScalar(0.84);
+  }
+  drone.userData.role = role;
+  return drone;
+}
+
 function createPointCloud() {
   const cloudPoints = new THREE.Points(sim.cloudGeometry, sim.cloudMaterial);
   cloud.scene.add(cloudPoints);
@@ -272,7 +323,7 @@ function setupUI() {
   els.randomizeBtn.addEventListener('click', () => {
     regenerateEnvironment(true);
     resetMission(false, false);
-    logMessage(`Room layout randomized. Seed ${sim.environmentSeed}.`);
+    logMessage(`Terrain sandbox randomized. Seed ${sim.environmentSeed}.`);
   });
   els.exportBtn.addEventListener('click', () => exportPointCloudAsPly());
 
@@ -317,11 +368,39 @@ function setupUI() {
   [els.moveSpeed, els.horizontalRays, els.verticalRays, els.horizontalFov, els.verticalFov, els.maxRange, els.voxelSize, els.dwellMs].forEach(
     (input) => {
       input.addEventListener('change', () => {
+        if (input === els.horizontalRays || input === els.verticalRays) {
+          els.swarmScanDensity.value = 'custom';
+        }
         refreshStatus();
         drawMissionGraph();
       });
     }
   );
+
+  [
+    els.missionMode,
+    els.swarmSize,
+    els.swarmFormation,
+    els.communicationRange,
+    els.communicationNeighbors,
+    els.communicationDropout,
+    els.swarmScanDensity,
+    els.environmentMode,
+    els.aoiPreset
+  ].forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input === els.swarmScanDensity) {
+        applySwarmScanDensityPreset();
+      }
+      if (input === els.environmentMode || input === els.aoiPreset) {
+        regenerateEnvironment(false);
+        resetMission(false, false);
+      }
+      syncSwarmMode();
+      refreshStatus();
+      drawMissionGraph();
+    });
+  });
 
   makeOverlayDraggable();
   refreshStatus();
@@ -343,6 +422,7 @@ function applySensorPreset(writeLog) {
 
 function currentSensorConfig() {
   const preset = SENSOR_PRESETS[els.sensorPreset.value] || SENSOR_PRESETS.spinning;
+  const rangeLimit = els.environmentMode.value === 'terrain' ? 80 : 20;
   return {
     label: preset.label,
     mode: preset.mode,
@@ -350,7 +430,7 @@ function currentSensorConfig() {
     verticalRays: clampInt(readNumber(els.verticalRays), 8, 96),
     horizontalFov: clamp(readNumber(els.horizontalFov), 45, 360),
     verticalFov: clamp(readNumber(els.verticalFov), 12, 130),
-    maxRange: clamp(readNumber(els.maxRange), 2, 20),
+    maxRange: clamp(readNumber(els.maxRange), 2, rangeLimit),
     pitchBiasRad: THREE.MathUtils.degToRad(preset.pitchBiasDeg)
   };
 }
@@ -361,43 +441,79 @@ function regenerateEnvironment(randomizeSeed) {
   }
 
   const rng = createRng(sim.environmentSeed);
-  sim.room = {
-    preset: els.roomPreset.value,
-    width: clamp(readNumber(els.roomWidth), 5, 14),
-    depth: clamp(readNumber(els.roomDepth), 5, 14),
-    height: clamp(readNumber(els.roomHeight), 2.6, 5)
-  };
+  const terrainMode = els.environmentMode.value === 'terrain';
+  sim.room = terrainMode
+    ? {
+        preset: 'terrain',
+        width: 180,
+        depth: 160,
+        height: 70
+      }
+    : {
+        preset: els.roomPreset.value,
+        width: clamp(readNumber(els.roomWidth), 5, 14),
+        depth: clamp(readNumber(els.roomDepth), 5, 14),
+        height: clamp(readNumber(els.roomHeight), 2.6, 5)
+      };
 
   sim.floorFootprints = [];
   sim.ceilingHazard = null;
+  sim.aoiTargets = [];
+  sim.terrainProfile = null;
   sim.scanTargets = [];
   main.roomGroup.clear();
   main.pathGroup.clear();
   main.beamGroup.clear();
 
   const roomScene = new THREE.Group();
-  buildRoomShell(sim.room).forEach((mesh) => roomScene.add(mesh));
+  if (terrainMode) {
+    buildTerrainSandbox(rng).forEach((object) => roomScene.add(object));
+  } else {
+    buildRoomShell(sim.room).forEach((mesh) => roomScene.add(mesh));
 
-  const furnitureGroup = new THREE.Group();
-  const furnitureCount = clampInt(readNumber(els.furnitureCount), 3, 14);
-  buildFurnitureLayout(rng, furnitureCount).forEach((item) => {
-    furnitureGroup.add(item.group);
-    sim.floorFootprints.push(item.footprint);
-  });
-  roomScene.add(furnitureGroup);
+    const furnitureGroup = new THREE.Group();
+    const furnitureCount = clampInt(readNumber(els.furnitureCount), 3, 14);
+    buildFurnitureLayout(rng, furnitureCount).forEach((item) => {
+      furnitureGroup.add(item.group);
+      sim.floorFootprints.push(item.footprint);
+    });
+    roomScene.add(furnitureGroup);
 
-  if (els.ceilingObstacles.value === 'on') {
-    const hazard = buildCeilingHazard(rng);
-    if (hazard) {
-      roomScene.add(hazard.group);
-      sim.ceilingHazard = hazard;
+    if (els.ceilingObstacles.value === 'on') {
+      const hazard = buildCeilingHazard(rng);
+      if (hazard) {
+        roomScene.add(hazard.group);
+        sim.ceilingHazard = hazard;
+      }
     }
   }
 
   main.roomGroup.add(roomScene);
   sim.scanTargets = collectMeshes(roomScene);
+  prepareRaycastAcceleration(sim.scanTargets);
   initializeMapper();
+  applyEnvironmentAtmosphere();
   fitCamerasToRoom();
+}
+
+function applySwarmScanDensityPreset() {
+  const preset = swarmScanDensityConfig(els.swarmScanDensity.value);
+  if (!preset.writeInputs) {
+    return;
+  }
+  els.horizontalRays.value = String(preset.horizontal);
+  els.verticalRays.value = String(preset.vertical);
+}
+
+function applyEnvironmentAtmosphere() {
+  if (els.environmentMode.value === 'terrain') {
+    main.scene.background = new THREE.Color('#0b1625');
+    main.scene.fog = new THREE.Fog('#0b1625', 320, 760);
+    return;
+  }
+
+  main.scene.background = new THREE.Color('#08111d');
+  main.scene.fog = new THREE.Fog('#08111d', 14, 38);
 }
 
 function buildRoomShell(room) {
@@ -448,6 +564,252 @@ function buildRoomShell(room) {
   grid.position.y = 0.002;
 
   return [floor, ceiling, backWall, frontWall, leftWall, rightWall, grid];
+}
+
+function buildTerrainSandbox(rng) {
+  const objects = [];
+  const terrain = createTerrainMesh();
+  objects.push(terrain);
+
+  const grid = new THREE.GridHelper(Math.max(sim.room.width, sim.room.depth), 48, '#456c9f', '#1a314c');
+  grid.position.y = 0.015;
+  objects.push(grid);
+  objects.push(buildTerrainReferenceMarkers());
+
+  const village = buildMountainVillage(rng);
+  objects.push(village);
+
+  const forest = buildTreeField(rng, 44);
+  objects.push(forest);
+
+  const tower = buildRelayTower();
+  objects.push(tower);
+
+  const aperture = buildValleyAperture();
+  objects.push(aperture);
+
+  const markers = buildAoiMarkers();
+  objects.push(markers);
+
+  sim.terrainProfile = {
+    valleyWidth: 26,
+    ridgeHeight: 52,
+    corridorScore: 0.68,
+    verticality: 0.72,
+    openness: 0.64
+  };
+
+  return objects;
+}
+
+function buildTerrainReferenceMarkers() {
+  const group = new THREE.Group();
+  const valleyMaterial = new THREE.LineBasicMaterial({ color: '#80d8ff', transparent: true, opacity: 0.58 });
+  const boundaryMaterial = new THREE.LineBasicMaterial({ color: '#ffdf7d', transparent: true, opacity: 0.35 });
+  const valleyPoints = [];
+  for (let z = -sim.room.depth * 0.45; z <= sim.room.depth * 0.45; z += 2) {
+    valleyPoints.push(new THREE.Vector3(0, terrainHeightAt(0, z) + 0.04, z));
+  }
+  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(valleyPoints), valleyMaterial));
+
+  const halfW = sim.room.width * 0.5;
+  const halfD = sim.room.depth * 0.5;
+  const corners = [
+    new THREE.Vector3(-halfW, 0.08, -halfD),
+    new THREE.Vector3(halfW, 0.08, -halfD),
+    new THREE.Vector3(halfW, 0.08, halfD),
+    new THREE.Vector3(-halfW, 0.08, halfD),
+    new THREE.Vector3(-halfW, 0.08, -halfD)
+  ];
+  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(corners), boundaryMaterial));
+  return group;
+}
+
+function terrainHeightAt(x, z) {
+  const halfW = sim.room.width * 0.5;
+  const halfD = sim.room.depth * 0.5;
+  const valleyCenter = Math.sin(z * 0.026) * 9 + Math.sin(z * 0.061) * 3;
+  const distFromValley = x - valleyCenter;
+  const edgeDistance = Math.min(halfW - Math.abs(x), halfD - Math.abs(z));
+  const edgeFade = THREE.MathUtils.smoothstep(edgeDistance, 0, 28);
+  const valleyFloor = 2.4 + Math.sin(z * 0.045) * 1.5 + Math.sin((x + z) * 0.028) * 0.6;
+  const leftRidge = Math.exp(-(((distFromValley + 46) ** 2) / 650)) * 28;
+  const rightRidge = Math.exp(-(((distFromValley - 50) ** 2) / 700)) * 31;
+  const foldedLeft = Math.exp(-(((distFromValley + 68) ** 2) / 380 + ((z + 28) ** 2) / 2200)) * 18;
+  const foldedRight = Math.exp(-(((distFromValley - 72) ** 2) / 420 + ((z - 34) ** 2) / 1800)) * 21;
+  const northPeak = Math.exp(-(((x + 54) ** 2) / 620 + ((z + 34) ** 2) / 920)) * 19;
+  const southPeak = Math.exp(-(((x - 58) ** 2) / 720 + ((z - 38) ** 2) / 820)) * 22;
+  const ridgeNoise = Math.sin(z * 0.085) * 1.8 + Math.sin((x - z) * 0.05) * 1.2;
+  const height = valleyFloor + leftRidge + rightRidge + foldedLeft + foldedRight + northPeak + southPeak + ridgeNoise;
+  return Math.max(0, height * (0.22 + edgeFade * 0.78));
+}
+
+function createTerrainMesh() {
+  const width = sim.room.width;
+  const depth = sim.room.depth;
+  const geometry = new THREE.PlaneGeometry(width, depth, 96, 84);
+  geometry.rotateX(-Math.PI / 2);
+  const positions = geometry.attributes.position;
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const z = positions.getZ(index);
+    positions.setY(index, terrainHeightAt(x, z));
+  }
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    color: '#3d815f',
+    roughness: 0.88,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = 'Mountain valley terrain';
+  return mesh;
+}
+
+function buildMountainVillage(rng) {
+  const group = new THREE.Group();
+  const houseMaterial = new THREE.MeshStandardMaterial({ color: '#b8a175', roughness: 0.78, metalness: 0.03 });
+  const roofMaterial = new THREE.MeshStandardMaterial({ color: '#7b3f4e', roughness: 0.72, metalness: 0.02 });
+  const baseX = -58;
+  const baseZ = -46;
+
+  for (let index = 0; index < 9; index += 1) {
+    const x = baseX + (index % 3) * 10.5 + rng() * 1.4;
+    const z = baseZ + Math.floor(index / 3) * 10.0 + rng() * 1.4;
+    const y = terrainHeightAt(x, z);
+    const width = 3.0 + rng() * 0.8;
+    const depth = 2.8 + rng() * 0.8;
+    const height = 2.2 + rng() * 1.2;
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), houseMaterial);
+    body.position.set(x, y + height * 0.5, z);
+    group.add(body);
+
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(width, depth) * 0.72, 1.0, 4), roofMaterial);
+    roof.position.set(x, y + height + 0.5, z);
+    roof.rotation.y = Math.PI * 0.25;
+    group.add(roof);
+
+    sim.floorFootprints.push({
+      minX: x - width * 0.58,
+      maxX: x + width * 0.58,
+      minZ: z - depth * 0.58,
+      maxZ: z + depth * 0.58,
+      height: y + height + 1.2,
+      type: 'village'
+    });
+  }
+
+  sim.aoiTargets.push({
+    id: 'aoi-village',
+    type: 'village',
+    label: 'Village cluster',
+    position: new THREE.Vector3(baseX + 10.5, terrainHeightAt(baseX + 10.5, baseZ + 10.0) + 5.2, baseZ + 10.0),
+    priority: els.aoiPreset.value === 'village' ? 2.2 : 1.2
+  });
+
+  return group;
+}
+
+function buildTreeField(rng, count) {
+  const group = new THREE.Group();
+  const trunkMaterial = new THREE.MeshStandardMaterial({ color: '#6e4d35', roughness: 0.84, metalness: 0.02 });
+  const leafMaterial = new THREE.MeshStandardMaterial({ color: '#2f8b5f', roughness: 0.88, metalness: 0.02 });
+
+  for (let index = 0; index < count; index += 1) {
+    const x = lerp(-sim.room.width * 0.42, sim.room.width * 0.42, rng());
+    const z = lerp(-sim.room.depth * 0.42, sim.room.depth * 0.42, rng());
+    if (Math.abs(x) < 4.8 && Math.abs(z) < 12) {
+      continue;
+    }
+    const y = terrainHeightAt(x, z);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 2.1, 8), trunkMaterial);
+    trunk.position.set(x, y + 1.05, z);
+    const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3.2, 9), leafMaterial);
+    leaves.position.set(x, y + 3.05, z);
+    group.add(trunk, leaves);
+
+    sim.floorFootprints.push({
+      minX: x - 0.9,
+      maxX: x + 0.9,
+      minZ: z - 0.9,
+      maxZ: z + 0.9,
+      height: y + 4.1,
+      type: 'tree'
+    });
+  }
+
+  return group;
+}
+
+function buildRelayTower() {
+  const x = 48;
+  const z = -44;
+  const y = terrainHeightAt(x, z);
+  const group = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: '#c7d6e8', roughness: 0.36, metalness: 0.42 });
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 12, 12), metal);
+  mast.position.set(x, y + 6, z);
+  const dish = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.08, 8, 24), metal);
+  dish.position.set(x, y + 10.2, z);
+  dish.rotation.y = Math.PI * 0.5;
+  group.add(mast, dish);
+
+  sim.floorFootprints.push({
+    minX: x - 1.3,
+    maxX: x + 1.3,
+    minZ: z - 1.3,
+    maxZ: z + 1.3,
+    height: y + 12.4,
+    type: 'tower'
+  });
+  sim.aoiTargets.push({
+    id: 'aoi-tower',
+    type: 'tower',
+    label: 'Relay tower',
+    position: new THREE.Vector3(x, y + 10.4, z),
+    priority: els.aoiPreset.value === 'tower' ? 2.4 : 1.35
+  });
+
+  return group;
+}
+
+function buildValleyAperture() {
+  const x = 0;
+  const z = 46;
+  const y = terrainHeightAt(x, z) + 7.4;
+  const material = new THREE.MeshStandardMaterial({ color: '#d7d0ba', roughness: 0.74, metalness: 0.03 });
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.24, 12, 36), material);
+  hoop.position.set(x, y, z);
+  hoop.rotation.y = Math.PI * 0.5;
+  hoop.name = 'Valley aperture AOI';
+
+  sim.aoiTargets.push({
+    id: 'aoi-aperture',
+    type: 'aperture',
+    label: 'Valley aperture',
+    position: new THREE.Vector3(x, y, z),
+    priority: els.aoiPreset.value === 'aperture' ? 2.6 : 1.6
+  });
+
+  return hoop;
+}
+
+function buildAoiMarkers() {
+  const group = new THREE.Group();
+  const markerMaterial = new THREE.MeshBasicMaterial({ color: '#ffdf7d', transparent: true, opacity: 0.72 });
+  const selected = els.aoiPreset.value;
+  sim.aoiTargets.forEach((aoi) => {
+    if (selected !== 'auto' && aoi.type !== selected) {
+      return;
+    }
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), markerMaterial);
+    marker.position.copy(aoi.position);
+    group.add(marker);
+  });
+  return group;
 }
 
 function buildFurnitureLayout(rng, count) {
@@ -732,8 +1094,9 @@ function buildCeilingHazard(rng) {
 }
 
 function initializeMapper() {
-  const res = clamp(readNumber(els.gridSize), 0.45, 1.6);
-  const margin = res;
+  const terrainMode = els.environmentMode.value === 'terrain';
+  const res = terrainMode ? Math.max(4, readNumber(els.gridSize) * 7) : clamp(readNumber(els.gridSize), 0.45, 1.6);
+  const margin = terrainMode ? res * 1.5 : res;
   sim.mapper = new VoxelGrid({
     room: sim.room,
     resolution: res,
@@ -746,13 +1109,42 @@ function initializeMapper() {
 
 function fitCamerasToRoom() {
   const radius = Math.max(sim.room.width, sim.room.depth) * 0.9;
-  main.controls.target.set(0, sim.room.height * 0.42, 0);
-  main.camera.position.set(radius, sim.room.height * 1.4, radius * 1.08);
+  if (els.environmentMode.value === 'terrain') {
+    main.controls.target.set(0, 12, -sim.room.depth * 0.3);
+    main.camera.position.set(radius * 0.42, 42, -radius * 0.72);
+  } else {
+    main.controls.target.set(0, sim.room.height * 0.42, 0);
+    main.camera.position.set(radius, sim.room.height * 1.25, radius * 1.08);
+  }
+  main.camera.updateProjectionMatrix();
   main.controls.update();
 
-  cloud.controls.target.set(0, sim.room.height * 0.35, 0);
-  cloud.camera.position.set(radius * 0.78, sim.room.height * 1.22, radius * 0.78);
+  updateCloudReferenceGrid();
+  if (els.environmentMode.value === 'terrain') {
+    cloud.controls.target.set(0, sim.room.height * 0.28, 0);
+    cloud.camera.position.set(radius * 0.58, Math.max(sim.room.height * 1.05, 62), radius * 0.7);
+  } else {
+    cloud.controls.target.set(0, sim.room.height * 0.35, 0);
+    cloud.camera.position.set(radius * 0.78, Math.max(sim.room.height * 1.22, 8), radius * 0.78);
+  }
+  cloud.camera.updateProjectionMatrix();
   cloud.controls.update();
+}
+
+function updateCloudReferenceGrid() {
+  const size = els.environmentMode.value === 'terrain' ? Math.max(sim.room.width, sim.room.depth) : 16;
+  const divisions = els.environmentMode.value === 'terrain' ? 48 : 32;
+  if (cloud.grid) {
+    cloud.scene.remove(cloud.grid);
+    cloud.grid.geometry.dispose();
+    if (Array.isArray(cloud.grid.material)) {
+      cloud.grid.material.forEach((material) => material.dispose());
+    } else {
+      cloud.grid.material.dispose();
+    }
+  }
+  cloud.grid = new THREE.GridHelper(size, divisions, '#5176af', '#1e2f49');
+  cloud.scene.add(cloud.grid);
 }
 
 function buildSeedHeights() {
@@ -842,11 +1234,14 @@ function resetMission(writeLog, clearLogs) {
   if (writeLog) {
     logMessage('Mission reset. 3D occupancy map and point cloud cleared.');
   }
+
+  syncSwarmMode();
 }
 
 function clearPointCloud() {
   sim.voxelMap.clear();
   sim.pointCount = 0;
+  sim.cloudDirty = false;
   sim.cloudGeometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
   sim.cloudGeometry.setAttribute('color', new THREE.Float32BufferAttribute([], 3));
   sim.cloudGeometry.computeBoundingSphere();
@@ -856,6 +1251,31 @@ function clearPointCloud() {
 }
 
 function startMission() {
+  if (isSwarmMode()) {
+    clearPointCloud();
+    initializeMapper();
+    sim.droneActive = true;
+    sim.missionStarted = true;
+    sim.complete = false;
+    sim.status = 'running';
+    sim.currentPhase = 'swarm';
+    sim.scanCounter = 0;
+    sim.pointCount = 0;
+    sim.swarmLaunchElapsedMs = 0;
+    sim.swarmScanElapsedMs = 0;
+    sim.commsRenderElapsedMs = 0;
+    sim.cloudFlushElapsedMs = 0;
+    main.pathGroup.clear();
+    main.beamGroup.clear();
+    initializeSwarm();
+    refreshStatus();
+    drawMissionGraph();
+    logMessage(
+      `Swarm V1 preview started with ${sim.swarmController.agents.length} drones in ${readableFormation(els.swarmFormation.value)} mode.`
+    );
+    return;
+  }
+
   clearPointCloud();
   initializeMapper();
   sim.droneActive = true;
@@ -921,6 +1341,7 @@ function animate(time) {
   const deltaSeconds = deltaMs / 1000;
 
   updateDrone(deltaSeconds, deltaMs);
+  updateSwarmPreview(deltaSeconds);
   main.controls.update();
   cloud.controls.update();
 
@@ -929,6 +1350,9 @@ function animate(time) {
 }
 
 function updateDrone(deltaSeconds, deltaMs) {
+  drawMissionGraph();
+  return;
+
   if (!sim.droneActive) {
     drawMissionGraph();
     return;
@@ -1488,6 +1912,529 @@ function finishMission() {
   );
 }
 
+function syncSwarmMode() {
+  const enabled = isSwarmMode();
+  main.drone.visible = !enabled;
+  main.swarmGroup.visible = enabled;
+  main.commGroup.visible = enabled;
+
+  if (enabled) {
+    initializeSwarm();
+    logMessage('Swarm V1 preview enabled. Single-drone planner remains preserved as the baseline mode.');
+  } else {
+    main.swarmGroup.clear();
+    main.commGroup.clear();
+    sim.swarmController = null;
+    sim.swarmTargets = [];
+    sim.swarmSnapshot = null;
+  }
+}
+
+function initializeSwarm() {
+  const config = readSwarmConfig();
+  main.swarmGroup.clear();
+  main.commGroup.clear();
+  sim.swarmController = new SwarmController(config);
+  const launchZ = els.environmentMode.value === 'terrain' ? -sim.room.depth * 0.42 : 0;
+  const origin = new THREE.Vector3(0, terrainClearanceY(0, launchZ, 0.28), launchZ);
+  sim.swarmController.initializeAgents({
+    count: config.droneCount,
+    origin,
+    createMesh: (index, role) => {
+      const mesh = createSwarmDroneMesh(role, index);
+      main.swarmGroup.add(mesh);
+      return mesh;
+    }
+  });
+  sim.swarmController.agents.forEach((agent) => {
+    const grounded = clampSwarmPosition(agent.position);
+    agent.setPosition(grounded);
+    agent.launchPosition.copy(grounded);
+  });
+  updateSwarmPreview(0);
+}
+
+function updateSwarmPreview(deltaSeconds) {
+  if (!isSwarmMode() || !sim.swarmController) {
+    return;
+  }
+
+  if (!sim.missionStarted || sim.status !== 'running') {
+    sim.commsRenderElapsedMs += deltaSeconds * 1000;
+    const idleSnapshot = sim.swarmController.update({
+      requestedFormation: els.swarmFormation.value,
+      environmentSignals: sim.terrainProfile ?? {},
+      frontiers: [],
+      aois: selectedAoiTargets(),
+      relayTargets: []
+    });
+    if (sim.commsRenderElapsedMs > 180 || !main.commGroup.children.length) {
+      sim.commsRenderElapsedMs = 0;
+      renderCommunicationGraph(idleSnapshot.communication.edges);
+    }
+    sim.swarmSnapshot = sim.swarmController.snapshot();
+    return;
+  }
+
+  sim.swarmLaunchElapsedMs += deltaSeconds * 1000;
+  sim.swarmScanElapsedMs += deltaSeconds * 1000;
+  sim.commsRenderElapsedMs += deltaSeconds * 1000;
+  sim.cloudFlushElapsedMs += deltaSeconds * 1000;
+
+  if (sim.swarmScanElapsedMs > 180) {
+    sim.swarmScanElapsedMs = 0;
+    performSwarmSensorPass();
+  }
+
+  const center = computeSwarmMissionCenter(selectedAoiTargets());
+  const frontierDensity = sim.mapper ? sim.mapper.frontierIndices.length / Math.max(sim.mapper.states.length, 1) : 0;
+  const obstacleDensity = sim.mapper ? sim.mapper.occupiedCount / Math.max(sim.mapper.knownCount, 1) : 0;
+  const terrainSignals = sim.terrainProfile ?? {};
+  const activeAois = selectedAoiTargets();
+  const snapshot = sim.swarmController.update({
+    requestedFormation: els.swarmFormation.value,
+    environmentSignals: {
+      frontierDensity,
+      obstacleDensity,
+      verticality: terrainSignals.verticality ?? (sim.ceilingHazard ? 0.42 : 0.12),
+      occlusion: terrainSignals.corridorScore ? 0.48 : obstacleDensity * 0.8,
+      corridorScore: terrainSignals.corridorScore ?? (sim.room && sim.room.depth > sim.room.width * 1.25 ? 0.72 : 0.2),
+      openness: estimateSwarmOpenness()
+    },
+    frontiers: sampleSwarmFrontierTasks(18),
+    aois: activeAois,
+    relayTargets: []
+  });
+
+  sim.swarmTargets = sim.swarmController.buildFormationTargets({
+    center,
+    heading: new THREE.Vector3(0, 0, 1),
+    radius: Math.max(sim.room.width, sim.room.depth) * (els.environmentMode.value === 'terrain' ? 0.18 : 0.38)
+  });
+
+  const launchProgress = clamp(sim.swarmLaunchElapsedMs / 3600, 0, 1);
+  const speedScale = launchProgress < 1 ? 0.45 : 1;
+  const speed = deltaSeconds > 0 ? clamp(readNumber(els.moveSpeed), 0.2, 4) * speedScale * deltaSeconds : 0;
+  sim.swarmController.agents.forEach((agent) => {
+    const target = sim.swarmTargets.find((candidate) => candidate.droneId === agent.id);
+    if (!target) {
+      return;
+    }
+    const takeoffTarget = agent.launchPosition.clone();
+    takeoffTarget.y = terrainClearanceY(takeoffTarget.x, takeoffTarget.z, terrainCruiseClearance() * launchProgress);
+    const activeTarget = launchProgress < 1 ? takeoffTarget : terrainAwareTarget(target.position, agent);
+    const next = agent.position.clone();
+    temp.travel.copy(activeTarget).sub(next);
+    const distance = temp.travel.length();
+    if (distance > speed && speed > 0) {
+      temp.travel.normalize().multiplyScalar(speed);
+      next.add(temp.travel);
+    } else {
+      next.copy(activeTarget);
+    }
+    agent.setPosition(next);
+    if (agent.mesh && distance > 0.01) {
+      agent.mesh.lookAt(activeTarget);
+    }
+  });
+
+  resolveSwarmCollisions();
+  resolveSwarmObstacleAvoidance();
+  enforceSwarmNetworkEnvelope();
+  const communication = sim.swarmController.communicationGraph.update(sim.swarmController.agents);
+  if (sim.commsRenderElapsedMs > 180 || !main.commGroup.children.length) {
+    sim.commsRenderElapsedMs = 0;
+    renderCommunicationGraph(communication.edges);
+  }
+  if (sim.cloudDirty && sim.cloudFlushElapsedMs > 850) {
+    sim.cloudFlushElapsedMs = 0;
+    flushPointCloudGeometry(Math.max(38, clamp(readNumber(els.maxRange), 2, 80)));
+  }
+  sim.swarmSnapshot = sim.swarmController.snapshot();
+  sim.currentPhase = launchProgress < 1 ? 'launch' : 'swarm';
+}
+
+function computeSwarmMissionCenter(activeAois) {
+  if (activeAois.length && els.aoiPreset.value !== 'auto') {
+    return terrainAwareTarget(activeAois[0].position);
+  }
+
+  if (els.environmentMode.value !== 'terrain') {
+    return new THREE.Vector3(0, buildSeedHeights()[0] || 1.1, 0);
+  }
+
+  const progress = clamp(sim.scanCounter / 180, 0, 1);
+  const z = lerp(-sim.room.depth * 0.36, sim.room.depth * 0.34, progress);
+  const x = Math.sin(progress * Math.PI * 2.2) * 5.5;
+  return new THREE.Vector3(x, terrainClearanceY(x, z, terrainCruiseClearance()), z);
+}
+
+function terrainAwareTarget(position, agent = null) {
+  const target = position.clone();
+  if (els.environmentMode.value === 'terrain') {
+    target.y = Math.max(target.y, terrainClearanceY(target.x, target.z, terrainCruiseClearance()));
+    if (agent?.assignment?.goal?.position) {
+      const goal = agent.assignment.goal.position;
+      target.x = lerp(target.x, goal.x, 0.22);
+      target.z = lerp(target.z, goal.z, 0.22);
+      target.y = Math.max(target.y, terrainClearanceY(target.x, target.z, terrainCruiseClearance()));
+    }
+  }
+  return clampSwarmPosition(target);
+}
+
+function terrainClearanceY(x, z, extraClearance = 0) {
+  if (els.environmentMode.value !== 'terrain') {
+    return Math.max(0.55, extraClearance);
+  }
+  return terrainHeightAt(x, z) + Math.max(0.38, extraClearance);
+}
+
+function terrainCruiseClearance() {
+  return Math.max(2.4, swarmCollisionRadius() * 4.2);
+}
+
+function sampleSwarmFrontierTasks(limit) {
+  if (els.environmentMode.value !== 'terrain') {
+    return sampleFrontierTasks(limit);
+  }
+
+  const tasks = [];
+  const scanProgress = clamp(sim.scanCounter / 180, 0, 1);
+  const baseZ = lerp(-sim.room.depth * 0.35, sim.room.depth * 0.35, scanProgress);
+  const lateralBands = [-18, -9, 0, 9, 18];
+  for (let index = 0; index < limit; index += 1) {
+    const x = lateralBands[index % lateralBands.length] + Math.sin(index * 1.7) * 2.5;
+    const z = baseZ + Math.floor(index / lateralBands.length) * 8;
+    if (z > sim.room.depth * 0.42) {
+      break;
+    }
+    tasks.push({
+      id: `terrain-frontier-${index}`,
+      position: new THREE.Vector3(x, terrainClearanceY(x, z, terrainCruiseClearance()), z),
+      priority: 1 + (index % lateralBands.length === 2 ? 0.2 : 0),
+      informationGain: 1.2
+    });
+  }
+  return tasks;
+}
+
+function estimateSwarmOpenness() {
+  const agents = sim.swarmController?.agents ?? [];
+  if (!agents.length) {
+    return sim.terrainProfile?.openness ?? 0.5;
+  }
+  const averagePoints = agents.reduce((sum, agent) => sum + agent.metrics.points, 0) / agents.length;
+  return clamp(1 - averagePoints / 600, 0.18, 0.9);
+}
+
+function performSwarmSensorPass() {
+  const agents = sim.swarmController?.agents ?? [];
+  if (!agents.length) {
+    return;
+  }
+
+  const beams = [];
+  const directions = buildSwarmScanDirections();
+  const sensorRange = Math.max(38, clamp(readNumber(els.maxRange), 2, 80));
+
+  agents.forEach((agent, agentIndex) => {
+    let hits = 0;
+    directions.forEach((direction, directionIndex) => {
+      temp.source.copy(agent.position);
+      temp.dir.copy(direction).normalize();
+      const hit = castSwarmRay(temp.source, temp.dir, sensorRange);
+      if (!hit) {
+        return;
+      }
+      hits += 1;
+      addPointToCloud(hit.point, hit.distance);
+      agent.recordPointObservation({
+        position: hit.point.clone(),
+        count: 1,
+        source: agent.id,
+        distance: hit.distance
+      });
+      if (agentIndex < 4 && directionIndex % Math.max(1, Math.floor(directions.length / 5)) === 0) {
+        beams.push([temp.source.clone(), hit.point.clone()]);
+      }
+    });
+    agent.metrics.scans += 1;
+    agent.recordMapDelta({
+      type: 'swarm-scan',
+      position: agent.position.clone(),
+      hits
+    });
+  });
+
+  sim.scanCounter += 1;
+  renderScanBeams(beams, 'swarm');
+}
+
+function buildSwarmScanDirections() {
+  const horizontalCount = clampInt(readNumber(els.horizontalRays), 4, 48);
+  const verticalCount = clampInt(readNumber(els.verticalRays), 2, 16);
+  const horizontalFov = THREE.MathUtils.degToRad(clamp(readNumber(els.horizontalFov), 90, 360));
+  const verticalFov = THREE.MathUtils.degToRad(clamp(readNumber(els.verticalFov), 30, 120));
+  const directions = [new THREE.Vector3(0, -1, 0)];
+
+  for (let v = 0; v < verticalCount; v += 1) {
+    const verticalT = verticalCount === 1 ? 0.5 : v / (verticalCount - 1);
+    const elevation = lerp(-verticalFov * 0.55, verticalFov * 0.22, verticalT);
+    for (let h = 0; h < horizontalCount; h += 1) {
+      const horizontalT = horizontalCount === 1 ? 0.5 : h / (horizontalCount - 1);
+      const yaw = lerp(-horizontalFov * 0.5, horizontalFov * 0.5, horizontalT) + Math.PI * 0.5;
+      directions.push(new THREE.Vector3(
+        Math.cos(elevation) * Math.cos(yaw),
+        Math.sin(elevation),
+        Math.cos(elevation) * Math.sin(yaw)
+      ));
+    }
+  }
+
+  return directions;
+}
+
+function swarmScanDensityConfig() {
+  switch (els.swarmScanDensity.value) {
+    case 'economy':
+      return { horizontal: 6, vertical: 2, writeInputs: true };
+    case 'light':
+      return { horizontal: 8, vertical: 3, writeInputs: true };
+    case 'dense':
+      return { horizontal: 16, vertical: 5, writeInputs: true };
+    case 'survey':
+      return { horizontal: 22, vertical: 7, writeInputs: true };
+    case 'max':
+      return { horizontal: 30, vertical: 9, writeInputs: true };
+    case 'custom':
+      return {
+        horizontal: clampInt(readNumber(els.horizontalRays), 4, 48),
+        vertical: clampInt(readNumber(els.verticalRays), 2, 16),
+        writeInputs: false
+      };
+    case 'balanced':
+    default:
+      return { horizontal: 12, vertical: 4, writeInputs: true };
+  }
+}
+
+function castSwarmRay(source, direction, maxRange) {
+  return castSceneRay(source, direction, maxRange);
+}
+
+function castSceneRay(source, direction, maxRange) {
+  if (!sim.scanTargets.length || maxRange <= 0.05) {
+    return null;
+  }
+  raycaster.near = 0.05;
+  raycaster.far = maxRange;
+  raycaster.set(source, direction);
+  const intersections = raycaster.intersectObjects(sim.scanTargets, true);
+  return intersections[0] ?? null;
+}
+
+function enforceSwarmNetworkEnvelope() {
+  const agents = sim.swarmController?.agents ?? [];
+  if (agents.length < 2) {
+    return;
+  }
+
+  const range = clamp(readNumber(els.communicationRange), 2, els.environmentMode.value === 'terrain' ? 80 : 30);
+  const requiredNeighbors = Math.min(clampInt(readNumber(els.communicationNeighbors), 1, 8), agents.length - 1);
+  const softMax = range * 0.9;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    agents.forEach((agent) => {
+      const nearest = agents
+        .filter((candidate) => candidate.id !== agent.id)
+        .map((candidate) => ({
+          agent: candidate,
+          distance: agent.position.distanceTo(candidate.position)
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, requiredNeighbors);
+
+      nearest.forEach((neighbor) => {
+        if (neighbor.distance <= softMax || neighbor.distance < 1e-6) {
+          return;
+        }
+        const correction = (neighbor.distance - softMax) * 0.5;
+        temp.travel.copy(neighbor.agent.position).sub(agent.position).normalize();
+        agent.setPosition(clampSwarmPosition(agent.position.clone().addScaledVector(temp.travel, correction)));
+        neighbor.agent.setPosition(clampSwarmPosition(neighbor.agent.position.clone().addScaledVector(temp.travel, -correction * 0.35)));
+      });
+    });
+  }
+}
+
+function resolveSwarmCollisions() {
+  const agents = sim.swarmController?.agents ?? [];
+  const radius = swarmCollisionRadius();
+  const minDistance = radius * 2;
+
+  for (let a = 0; a < agents.length; a += 1) {
+    for (let b = a + 1; b < agents.length; b += 1) {
+      const first = agents[a];
+      const second = agents[b];
+      temp.travel.copy(first.position).sub(second.position);
+      let distance = temp.travel.length();
+      if (distance < 1e-6) {
+        temp.travel.set(1, 0, 0);
+        distance = 1;
+      }
+      if (distance >= minDistance) {
+        continue;
+      }
+      const push = (minDistance - distance) * 0.5;
+      temp.travel.normalize();
+      first.setPosition(first.position.clone().addScaledVector(temp.travel, push));
+      second.setPosition(second.position.clone().addScaledVector(temp.travel, -push));
+    }
+  }
+
+  agents.forEach((agent) => agent.setPosition(clampSwarmPosition(agent.position)));
+}
+
+function resolveSwarmObstacleAvoidance() {
+  const agents = sim.swarmController?.agents ?? [];
+  const radius = swarmCollisionRadius();
+  agents.forEach((agent) => {
+    const next = agent.position.clone();
+    sim.floorFootprints.forEach((footprint) => {
+      const insideX = next.x > footprint.minX - radius && next.x < footprint.maxX + radius;
+      const insideZ = next.z > footprint.minZ - radius && next.z < footprint.maxZ + radius;
+      const insideY = next.y < footprint.height + radius;
+      if (!insideX || !insideZ || !insideY) {
+        return;
+      }
+
+      const left = Math.abs(next.x - (footprint.minX - radius));
+      const right = Math.abs((footprint.maxX + radius) - next.x);
+      const back = Math.abs(next.z - (footprint.minZ - radius));
+      const front = Math.abs((footprint.maxZ + radius) - next.z);
+      const min = Math.min(left, right, back, front);
+      if (min === left) {
+        next.x = footprint.minX - radius;
+      } else if (min === right) {
+        next.x = footprint.maxX + radius;
+      } else if (min === back) {
+        next.z = footprint.minZ - radius;
+      } else {
+        next.z = footprint.maxZ + radius;
+      }
+    });
+
+    if (sim.ceilingHazard) {
+      const lateral = Math.hypot(next.x - sim.ceilingHazard.x, next.z - sim.ceilingHazard.z);
+      const minLateral = sim.ceilingHazard.radius + radius;
+      if (lateral < minLateral && next.y > sim.ceilingHazard.bottomY - radius) {
+        const angle = Math.atan2(next.z - sim.ceilingHazard.z, next.x - sim.ceilingHazard.x);
+        next.x = sim.ceilingHazard.x + Math.cos(angle) * minLateral;
+        next.z = sim.ceilingHazard.z + Math.sin(angle) * minLateral;
+      }
+    }
+
+    agent.setPosition(clampSwarmPosition(next));
+  });
+}
+
+function clampSwarmPosition(position) {
+  const radius = swarmCollisionRadius();
+  const floorY = els.environmentMode.value === 'terrain'
+    ? terrainClearanceY(position.x, position.z, radius + 0.22)
+    : Math.max(0.55, radius);
+  return new THREE.Vector3(
+    clamp(position.x, -sim.room.width * 0.5 + radius, sim.room.width * 0.5 - radius),
+    clamp(position.y, floorY, sim.room.height - radius - 0.12),
+    clamp(position.z, -sim.room.depth * 0.5 + radius, sim.room.depth * 0.5 - radius)
+  );
+}
+
+function swarmCollisionRadius() {
+  const base = els.environmentMode.value === 'terrain' ? 0.32 : 0.42;
+  const scale = els.environmentMode.value === 'terrain' ? 0.55 : 0.82;
+  return Math.max(base, clamp(readNumber(els.safetyRadius), 0.2, 1.4) * scale);
+}
+
+function renderCommunicationGraph(edges) {
+  main.commGroup.clear();
+  if (!edges.length || !sim.swarmController) {
+    return;
+  }
+
+  const material = new THREE.LineBasicMaterial({
+    color: '#7dffd6',
+    transparent: true,
+    opacity: 0.34
+  });
+  const agents = new Map(sim.swarmController.agents.map((agent) => [agent.id, agent]));
+
+  edges.forEach((edge) => {
+    const from = agents.get(edge.from);
+    const to = agents.get(edge.to);
+    if (!from || !to) {
+      return;
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints([from.position, to.position]);
+    main.commGroup.add(new THREE.Line(geometry, material));
+  });
+}
+
+function sampleFrontierTasks(limit) {
+  if (!sim.mapper || !sim.mapper.frontierIndices.length) {
+    return [];
+  }
+
+  return sim.mapper.frontierIndices.slice(0, limit).map((index) => {
+    const cell = unpackIndex(index);
+    return {
+      id: `frontier-${index}`,
+      position: voxelToWorld(cell.col, cell.row, cell.layer),
+      priority: 1,
+      informationGain: 1
+    };
+  });
+}
+
+function selectedAoiTargets() {
+  if (!sim.aoiTargets.length) {
+    return [];
+  }
+  if (els.aoiPreset.value === 'auto') {
+    return sim.aoiTargets.map(aoiToTask);
+  }
+  return sim.aoiTargets.filter((aoi) => aoi.type === els.aoiPreset.value).map(aoiToTask);
+}
+
+function aoiToTask(aoi) {
+  return {
+    id: aoi.id,
+    type: 'aoi',
+    position: aoi.position,
+    priority: aoi.priority,
+    informationGain: 1.4,
+    label: aoi.label
+  };
+}
+
+function readSwarmConfig() {
+  const terrainMode = els.environmentMode.value === 'terrain';
+  return {
+    droneCount: clampInt(readNumber(els.swarmSize), 3, 24),
+    communicationRange: clamp(readNumber(els.communicationRange), 2, terrainMode ? 80 : 30),
+    maxNeighbors: clampInt(readNumber(els.communicationNeighbors), 1, 8),
+    communicationDropout: clamp(readNumber(els.communicationDropout), 0, 0.45),
+    formationMode: els.swarmFormation.value,
+    spacing: terrainMode ? 5.6 : Math.max(1.1, clamp(readNumber(els.safetyRadius), 0.2, 1.4) * 3.2),
+    verticalSpan: Math.max(0.8, sim.room.height * (terrainMode ? 0.28 : 0.48))
+  };
+}
+
+function isSwarmMode() {
+  return true;
+}
+
 function renderScanBeams(segments, scanContext) {
   main.beamGroup.clear();
   if (!segments.length) {
@@ -1529,15 +2476,20 @@ function addPointToCloud(point, distance) {
       distanceSum: distance
     });
     sim.pointCount = sim.voxelMap.size;
+    sim.cloudDirty = true;
     return;
   }
 
   entry.sum.add(point);
   entry.count += 1;
   entry.distanceSum += distance;
+  sim.cloudDirty = true;
 }
 
 function flushPointCloudGeometry(maxRange) {
+  if (!sim.cloudDirty && sim.pointCount > 0) {
+    return;
+  }
   const positions = [];
   const colors = [];
 
@@ -1560,6 +2512,7 @@ function flushPointCloudGeometry(maxRange) {
   sim.cloudGeometry.computeBoundingSphere();
   els.pointsReadout.textContent = sim.pointCount.toLocaleString();
   els.cloudMeta.textContent = `${sim.pointCount.toLocaleString()} pts`;
+  sim.cloudDirty = false;
 }
 
 function drawMissionGraph() {
@@ -1685,7 +2638,7 @@ function drawMissionGraph() {
 }
 
 function refreshStatus() {
-  els.modeReadout.textContent = els.scanMode.value === 'continuous' ? 'Continuous' : 'Stepped';
+  els.modeReadout.textContent = isSwarmMode() ? 'Swarm V1' : els.scanMode.value === 'continuous' ? 'Continuous' : 'Stepped';
   els.stateReadout.textContent = readableStatus(sim.status);
   els.pointsReadout.textContent = sim.pointCount.toLocaleString();
   els.scansReadout.textContent = sim.scanCounter.toLocaleString();
@@ -1693,6 +2646,9 @@ function refreshStatus() {
   els.seedReadout.textContent = String(sim.environmentSeed);
   els.phaseReadout.textContent = readablePhase(sim.currentPhase);
   els.plannerReadout.textContent = readablePlanner(els.plannerMode.value);
+  els.swarmReadout.textContent = isSwarmMode() ? `${clampInt(readNumber(els.swarmSize), 3, 24)} drones` : 'Off';
+  els.formationReadout.textContent = readableFormation(sim.swarmSnapshot?.metrics?.formationMode ?? els.swarmFormation.value);
+  els.commsReadout.textContent = sim.swarmSnapshot ? `${sim.swarmSnapshot.communication.edges.length} links` : '0 links';
 
   const total = sim.mapper ? sim.mapper.states.length : 1;
   const coverage = sim.mapper ? Math.round((sim.mapper.knownCount / Math.max(total, 1)) * 100) : 0;
@@ -1880,6 +2836,15 @@ function collectMeshes(group) {
   return meshes;
 }
 
+function prepareRaycastAcceleration(meshes) {
+  meshes.forEach((mesh) => {
+    if (!mesh.geometry || mesh.geometry.boundsTree) {
+      return;
+    }
+    mesh.geometry.computeBoundsTree();
+  });
+}
+
 function worldToVoxel(x, y, z) {
   if (!sim.mapper) {
     return null;
@@ -1943,6 +2908,10 @@ function readablePhase(phase) {
       return 'Inspect';
     case 'avoid':
       return 'Avoid';
+    case 'launch':
+      return 'Launch';
+    case 'swarm':
+      return 'Swarm';
     case 'complete':
       return 'Complete';
     default:
@@ -1958,5 +2927,35 @@ function readablePlanner(mode) {
       return 'Greedy';
     default:
       return 'A*';
+  }
+}
+
+function readableFormation(mode) {
+  switch (mode) {
+    case FORMATION_MODES.SCATTER:
+      return 'Scatter';
+    case FORMATION_MODES.LINE_SWEEP:
+      return 'Line sweep';
+    case FORMATION_MODES.WEDGE:
+      return 'Wedge';
+    case FORMATION_MODES.RELAY_CHAIN:
+      return 'Relay chain';
+    case FORMATION_MODES.PERIMETER_RING:
+      return 'Perimeter ring';
+    default:
+      return 'Adaptive';
+  }
+}
+
+function roleColor(role) {
+  switch (role) {
+    case 'mapper':
+      return '#7dffd6';
+    case 'relay':
+      return '#ffd26f';
+    case 'verifier':
+      return '#ff9ccc';
+    default:
+      return '#79b8ff';
   }
 }
