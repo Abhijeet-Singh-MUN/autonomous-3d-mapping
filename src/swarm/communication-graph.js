@@ -8,7 +8,7 @@ export class CommunicationGraph {
     this.links = new Map();
   }
 
-  update(agents) {
+  update(agents, { canLink = null } = {}) {
     this.links.clear();
     agents.forEach((agent) => this.links.set(agent.id, []));
 
@@ -16,7 +16,7 @@ export class CommunicationGraph {
     for (let a = 0; a < agents.length; a += 1) {
       for (let b = a + 1; b < agents.length; b += 1) {
         const distance = agents[a].position.distanceTo(agents[b].position);
-        if (distance <= this.range) {
+        if (distance <= this.range && (!canLink || canLink(agents[a], agents[b], distance))) {
           candidates.push({
             from: agents[a].id,
             to: agents[b].id,

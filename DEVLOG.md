@@ -48,7 +48,7 @@ This log captures why changes are made, which issues they address, and what they
 ### Terrain sandbox implementation
 
 - Added a mountain valley sandbox as the first large-scale test environment.
-- Included a small village, tree field, relay tower, and hoop-like valley aperture as object/AOI targets.
+- Included a small village, tree field, complex building, and hoop-like valley aperture as object/AOI targets.
 - Rationale: adaptive swarm behavior cannot be judged inside the compact room because scale, altitude layers, terrain openness, valley narrowness, and AOI focus never become meaningfully different.
 - Fixed terrain visibility by using a separate outdoor atmosphere profile with a much longer fog range.
 - Issue addressed: the terrain was inheriting the close indoor fog, so distant mountains and valley features only became visible after zooming in.
@@ -78,7 +78,38 @@ This log captures why changes are made, which issues they address, and what they
 - Removed analytic terrain intersections from LiDAR sensing because they gave the swarm privileged knowledge of the generated terrain.
 - Kept terrain height checks only for simulator-side ground clearance and crash prevention.
 - Added `three-mesh-bvh` so LiDAR rays against terrain and objects use spatial acceleration instead of default brute-force mesh raycasting.
+
+### Terrain control cleanup
+
+- Replaced hidden room-generation controls with terrain-generation controls for width, depth, flight ceiling, mountain height, valley width, village structures, tree count, and preview voxel resolution.
+- Removed old room control listeners from the active environment regeneration path.
+- Reframed legacy single-drone bootstrap controls: vertical seed levels and bootstrap scans are no longer part of the swarm terrain UI.
 - Removed temporary sphere/ring drone markers because they looked like unexplained objects instead of UI aids.
+
+### Network correctness pass
+
+- Added terrain flight clearance control so drones can cruise higher above the terrain surface.
+- Changed communication links to amber and swarm LiDAR beams to blue so network edges and sensor rays are visually distinct.
+- Added terrain line-of-sight filtering so communication edges are not considered usable when the straight link passes through terrain.
+
+### Performance budget pass
+
+- Added visible performance profiles instead of claiming a hard dedicated-GPU percentage cap, because browser WebGL does not expose reliable GPU utilization control.
+- Budget profiles adjust render scale, visible point-cloud cap, scan cadence, point-cloud geometry upload cadence, communication redraw cadence, mission graph redraw cadence, and visible beam count.
+- Kept the swarm contract intact: every scan pass still scans every active drone. The budget layer spaces expensive passes/uploads and samples the rendered point cloud, while the stored/exported point cloud remains full fidelity.
+- Added adaptive frame timing so the sim can gently lower render scale and slow visual uploads when average frame time rises.
+
+### Object-capture readability pass
+
+- Changed point-cloud coloring from a mostly one-dimensional height/range ramp to a multi-axis gradient using height, range, confidence, lateral/depth position, and small spatial variation.
+- Rationale: thin objects such as trees, poles, vehicles, and buildings need more chromatic separation from terrain to be inspectable in the point-cloud overlay.
+- Replaced the relay-tower AOI with a larger complex building target.
+- Added inert static vehicle/artifact silhouettes near the valley aperture as non-operational LiDAR dataset objects only; they do not add targeting, strike, jamming, or weapon behavior.
+- Expanded the valley aperture object field with additional trucks, tracked vehicle silhouettes, and gun-shaped static artifacts for denser object-capture testing.
+- Added terrain-aware placement search and embedded terrain foundations so the building and object-field props adapt to generated terrain instead of floating or intersecting steep mountain surfaces.
+- Added viewport keyboard navigation: the hovered sim or point-cloud window accepts `W/A/S/D`, `Q/E`, and `Shift` for faster inspection movement while mouse orbit/zoom still works.
+- Increased practical scan density slightly and added AOI-focused scan cones that activate near selected AOIs, giving structures and object fields more point samples without globally overloading terrain scans.
+- Added AOI return metadata and a high-contrast AOI point-cloud highlight blend so object-capture regions do not visually disappear into the terrain color ramp.
 
 ### Adaptive algorithm design stance
 

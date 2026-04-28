@@ -1,15 +1,14 @@
-# Autonomous Room LiDAR Sim
+# Autonomous Terrain Swarm LiDAR Sim
 
 Working repo name: `autonomous-3d-mapping`
 
-This is a standalone Three.js + Vite simulator for an autonomous drone that:
+This is a standalone Three.js + Vite simulator for an autonomous terrain-mapping drone swarm that:
 
-- bootstraps a map from LiDAR data
-- builds a discovered 3D voxel graph online
-- chooses frontier and inspection goals from sensed space
-- replans with `A*`, weighted `A*`, or greedy best-first search
-- avoids collisions with short-range forward safety checks
-- exports colored point clouds as `PLY`
+- launches multiple coordinated drones into a synthetic mountain-valley environment
+- scans terrain and objects with scene raycast LiDAR
+- records colored point clouds as `PLY`
+- maintains range-limited drone-to-drone communication links
+- adapts swarm formations around terrain, AOIs, and network constraints
 
 ## Current Architecture
 
@@ -40,19 +39,19 @@ The simulator now treats the map as a voxel-based state graph. Each grid vertex 
 
 Coordinate convention:
 
-- `col`: room X axis
-- `row`: room Z/depth axis
-- `layer`: room Y/height axis
+- `col`: terrain X axis
+- `row`: terrain Z/depth axis
+- `layer`: terrain Y/height axis
 
-This matters because the planner, coverage map, height bands, and collision clearance must all agree on what "up" means.
+This matters because the mapper, coverage view, and collision clearance must all agree on what "up" means.
 
 ## Swarm V1 Branch
 
-The `swarm-v1` branch is the active development branch for adaptive multi-drone exploration. The posted single-drone room simulator remains the baseline behavior while the swarm layer is built in modules.
+The `swarm-v1` branch is the active development branch for adaptive multi-drone terrain exploration. The posted single-drone room simulator remains preserved on `main`; this branch is now terrain/swarm focused.
 
 Swarm V1 direction:
 
-- Preserve the current single-drone planner and room workflow.
+- Preserve the posted single-drone workflow on `main`.
 - Add configurable swarms of `3..24` drones.
 - Use adaptive graph formations rather than fixed-only formations.
 - Simulate range-limited drone-to-drone communication with latency/dropout hooks.
@@ -62,8 +61,8 @@ Swarm V1 direction:
 Current Swarm V1 preview:
 
 - `Mission mode` is now fixed to `Swarm V1 preview` on this branch. The single-drone baseline remains preserved on `main`.
-- `Environment mode` can switch from the room baseline to a mountain valley sandbox.
-- `AOI preset` selects autonomous AOIs or a specific village, tower, or aperture focus target before mission start.
+- Terrain generation controls shape the mountain-valley sandbox directly.
+- `AOI preset` selects autonomous AOIs or a specific village, complex building, or aperture focus target before mission start.
 - `Swarm drones` configures the visible drone count from `3..24`.
 - `Swarm formation` exposes adaptive graph, scatter, line sweep, wedge, relay chain, and perimeter ring modes.
 - `Max reliable link distance`, `K-nearest comms links`, and `Link dropout probability` drive the range-limited communication graph.
@@ -76,7 +75,7 @@ Current Swarm V1 preview:
 - Swarm drones run budgeted local ray scans, add hits to the point cloud, and record per-agent observations for map-fusion scaffolding.
 - Swarm motion now applies a communication envelope so drones are pulled back toward their nearest reliable neighbors before links are rendered.
 - This slice previews swarm topology, launch behavior, heuristic sensing, and mission state; full shared voxel fusion and robust planner integration are next-stage work.
-- The terrain sandbox is scaled up with taller mountains, a wider valley corridor, larger village spacing, trees, a relay tower, and a hoop-like aperture AOI to make 3D swarm behavior testable at a more realistic scale.
+- The terrain sandbox is scaled up with taller mountains, a wider valley corridor, larger village spacing, trees, a complex building AOI, and a hoop-like aperture object field to make 3D swarm behavior testable at a more realistic scale.
 - Terrain mode uses a much wider outdoor camera fog range so distant mountains and valley features remain visible before zooming in.
 - Terrain mode uses a coarse preview voxel grid, lower-density terrain mesh, BVH-accelerated scene raycasts, selectable swarm scan density, throttled communication redraws, and batched point-cloud updates to keep the swarm preview responsive.
 - The point-cloud viewport now scales its reference grid/camera to the active terrain environment instead of staying room-sized.
@@ -123,17 +122,29 @@ npm run preview
 
 - The main terrain simulation and point-cloud overlay are both resizable from the lower-right grip.
 - The point-cloud overlay can also be dragged by its header.
-- Both 3D windows use `OrbitControls`, so orbit, zoom, and pan are handled by the Three.js control layer.
+- Both 3D windows use mouse `OrbitControls`: left-drag changes viewing angle, wheel zooms, and right-drag pans.
+- Hover either 3D window and use `W/A/S/D` to pan through the scene, with `Q/E` for down/up and `Shift` for faster movement.
 
 ### Swarm and terrain
 
-- `AOI preset`: chooses autonomous AOIs or a specific village, tower, or aperture focus target.
+- `AOI preset`: chooses autonomous AOIs or a specific village, complex building, or aperture focus target.
+- `Terrain width`, `Terrain depth`: change the horizontal scale of the synthetic environment.
+- `Flight ceiling`: controls the maximum drone altitude and mapper volume.
+- `Mountain height`: scales ridge and peak height.
+- `Valley width`: changes how open or narrow the central valley corridor is.
+- `Village structures`: changes the number of generated village buildings.
+- `Tree count`: changes generated vegetation density.
+- `Preview voxel resolution`: controls the coarse swarm preview occupancy grid.
 - `Swarm drones`: controls active drone count from `3..24`.
 - `Swarm formation`: selects adaptive graph, scatter, line sweep, wedge, relay chain, or perimeter ring behavior.
 - `Max reliable link distance`: maximum distance for a usable drone-to-drone communication edge.
 - `K-nearest comms links`: target reliable neighbor count for each drone.
 - `Link dropout probability`: defaults to `0`; raising it intentionally stress-tests unreliable comms.
+- `Performance budget`: browser-side workload profile. It controls render scale, visible point-cloud cap, scan cadence, point-cloud upload cadence, comm-link redraw cadence, and mission graph redraw cadence.
+- `Visible point cap`: maximum point-cloud samples drawn in the viewport at once. Export still uses the full stored point cloud.
+- `Render scale cap`: maximum WebGL pixel ratio used by the simulation and point-cloud canvases.
 - `Safety radius`: minimum collision/clearance envelope used by swarm separation and terrain clearance.
+- `Terrain flight clearance`: target altitude above terrain for cruise and formation targets.
 - `Move speed`: visible swarm motion speed.
 - `Randomize Terrain`: rebuilds the mountain-valley sandbox seed.
 
@@ -145,6 +156,7 @@ npm run preview
 - `Sensor range`: caps raycast distance and therefore how far free/occupied voxels can be discovered.
 - `Voxel size`: controls point-cloud downsampling size.
 - `Dwell / scan interval`: timing knob retained for mission update cadence.
+- AOI capture adds a focused scan cone when drones approach an AOI, so buildings and valley object fields receive denser point samples without globally increasing every terrain ray.
 
 Current limits:
 
@@ -157,7 +169,12 @@ Current limits:
 - The current swarm branch uses coarse preview voxel state for responsiveness while the point cloud records denser samples.
 - LiDAR discovery raycasts against the rendered scene meshes. The terrain height model is only used by the simulator for ground clearance/crash prevention, not as drone knowledge.
 - Point-cloud geometry is flushed in batches: drone observations and global visualization samples are accumulated first, then periodically uploaded to the Three.js `BufferGeometry` used by the visible point cloud.
+- Point-cloud colors use a multi-axis gradient from height, sensor range, confidence, and world position so thin objects, buildings, trees, and poles are easier to distinguish from terrain.
+- AOI-focused returns blend toward a high-contrast highlight palette, making the active object-capture area easier to inspect in the point-cloud overlay and exported PLY colors.
+- Performance budgets are simulator-side safety limits, not a true operating-system GPU cap. Browser WebGL does not expose reliable dedicated-GPU utilization control, so the sim manages workload through render scale, visible point cap, redraw cadence, and adaptive frame timing.
+- Every scan pass still includes every active drone. Under heavier budgets, the sim may space scan passes and visual uploads farther apart instead of rotating drones out of sensing.
 - Raycasting uses `three-mesh-bvh` acceleration so all drones can scan without falling back to privileged terrain shortcuts.
+- Communication links are terrain line-of-sight filtered; links are not considered usable if the straight connection passes through the terrain surface.
 - Full planner-backed voxel traversal and map fusion are upcoming milestones.
 
 ## Export
@@ -169,7 +186,7 @@ Use `Export PLY` after a mission to save the current colored point cloud for lat
 ### 2026-04-27
 
 - Added `DEVLOG.md` to track issues, design rationale, and feature decisions as Swarm V1 evolves.
-- Added a mountain valley sandbox environment with terrain, village structures, trees, a relay tower, and an aperture AOI.
+- Added a mountain valley sandbox environment with terrain, village structures, trees, a complex building AOI, and an aperture object field.
 - Rescaled the terrain sandbox to a larger mountain-valley environment with wider village lanes and smaller terrain-mode drone meshes.
 - Added terrain-following clearance so swarm drones stay above the mountain surface instead of clipping through it.
 - Added a square-lattice launch phase with takeoff before the swarm begins formation movement.
@@ -182,6 +199,14 @@ Use `Export PLY` after a mission to save the current colored point cloud for lat
 - Kept dense scanning responsive by capping per-drone fan size by density level and batching point-cloud flushes.
 - Removed the analytic terrain-hit shortcut from LiDAR sensing so terrain is discovered through scene raycasts rather than privileged generator knowledge.
 - Added `three-mesh-bvh` to accelerate scene raycasts for dense swarm LiDAR.
+- Added terrain flight clearance control and terrain line-of-sight filtering for network links.
+- Changed network-link color to amber and LiDAR beam color to blue so comms and sensing read as separate systems.
+- Added simulator performance budgets for render scale, visible point-cloud cap, scan cadence, point-cloud geometry uploads, comm redraws, and mission graph redraws.
+- Updated point-cloud coloring from a mostly height/range ramp to a multi-axis gradient so object geometry is easier to read.
+- Replaced the relay tower AOI with a larger complex building and added inert static vehicle/artifact props near the valley aperture as LiDAR dataset targets.
+- Added terrain-aware AOI prop placement with embedded foundations so generated buildings and valley object-field props sit naturally on changed terrain.
+- Added keyboard navigation for both the terrain simulation and point-cloud viewports.
+- Added AOI-focused scan cones and AOI-highlight point-cloud coloring so the swarm records selected structures/object fields with denser, more readable samples.
 - Removed the temporary sphere/ring markers above swarm drones.
 - Changed the terrain height model from boundary-rising slopes to interior ridges/peaks with edge falloff so mountains read less like a clipped cloth plane.
 - Scaled the point-cloud viewport grid and camera to terrain mode instead of leaving it at room scale.

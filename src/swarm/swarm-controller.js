@@ -61,8 +61,8 @@ export class SwarmController {
     return Array.from({ length: count }, (_, index) => roles[index % roles.length]);
   }
 
-  update({ requestedFormation = this.config.formationMode, environmentSignals = {}, frontiers = [], aois = [], relayTargets = [] } = {}) {
-    const communication = this.communicationGraph.update(this.agents);
+  update({ requestedFormation = this.config.formationMode, environmentSignals = {}, frontiers = [], aois = [], relayTargets = [], linkValidator = null } = {}) {
+    const communication = this.communicationGraph.update(this.agents, { canLink: linkValidator });
     const connectedComponents = communication.components.length;
     const communicationHealth = this.agents.length <= 1 ? 1 : 1 / Math.max(connectedComponents, 1);
     const terrainClass = this.terrainClassifier.classify({

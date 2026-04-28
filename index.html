@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Autonomous Room LiDAR Simulator</title>
+    <title>Autonomous Terrain Swarm LiDAR Simulator</title>
     <script type="module" src="/src/main.js"></script>
   </head>
   <body>
@@ -11,8 +11,8 @@
       <section class="scene-panel">
         <div class="scene-toolbar">
           <div>
-            <p class="eyebrow">Autonomous Room LiDAR Lab</p>
-            <h1>Drone room exploration and point-cloud capture</h1>
+            <p class="eyebrow">Autonomous Terrain Swarm Lab</p>
+            <h1>Drone swarm terrain mapping and point-cloud capture</h1>
           </div>
           <div class="status-cluster">
             <div class="status-pill">
@@ -62,11 +62,43 @@
               </select>
             </label>
             <label>
+              <span>Terrain width</span>
+              <input id="terrainWidth" type="number" min="80" max="320" step="10" value="180" />
+            </label>
+            <label>
+              <span>Terrain depth</span>
+              <input id="terrainDepth" type="number" min="80" max="320" step="10" value="160" />
+            </label>
+            <label>
+              <span>Flight ceiling</span>
+              <input id="terrainHeight" type="number" min="30" max="120" step="5" value="70" />
+            </label>
+            <label>
+              <span>Mountain height</span>
+              <input id="terrainRidgeHeight" type="number" min="12" max="80" step="2" value="52" />
+            </label>
+            <label>
+              <span>Valley width</span>
+              <input id="terrainValleyWidth" type="number" min="10" max="60" step="2" value="26" />
+            </label>
+            <label>
+              <span>Village structures</span>
+              <input id="villageCount" type="number" min="0" max="24" step="1" value="9" />
+            </label>
+            <label>
+              <span>Tree count</span>
+              <input id="treeCount" type="number" min="0" max="140" step="5" value="44" />
+            </label>
+            <label>
+              <span>Preview voxel resolution</span>
+              <input id="terrainVoxelResolution" type="number" min="2" max="14" step="0.5" value="6.3" />
+            </label>
+            <label>
               <span>AOI preset</span>
               <select id="aoiPreset">
                 <option value="auto">Auto terrain AOIs</option>
                 <option value="village">Village cluster</option>
-                <option value="tower">Relay tower</option>
+                <option value="structure">Complex building</option>
                 <option value="aperture">Valley aperture</option>
               </select>
             </label>
@@ -109,13 +141,23 @@
                 <option value="custom">Custom</option>
               </select>
             </label>
-            <label hidden>
-              <span>Room preset</span>
-              <select id="roomPreset">
-                <option value="mixed">Mixed room</option>
-                <option value="living">Living room</option>
-                <option value="bedroom">Bedroom</option>
+            <label>
+              <span>Performance budget</span>
+              <select id="performanceBudget">
+                <option value="safe">GPU safe</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="quality">Quality</option>
+                <option value="capture">Capture</option>
+                <option value="custom">Custom</option>
               </select>
+            </label>
+            <label>
+              <span>Visible point cap</span>
+              <input id="visiblePointBudget" type="number" min="10000" max="300000" step="5000" value="90000" />
+            </label>
+            <label>
+              <span>Render scale cap</span>
+              <input id="renderScaleBudget" type="number" min="0.65" max="2" step="0.05" value="1.35" />
             </label>
             <label hidden>
               <span>Scan mode</span>
@@ -149,48 +191,13 @@
                 <option value="curved">Curved</option>
               </select>
             </label>
-            <label hidden>
-              <span>Ceiling obstacle</span>
-              <select id="ceilingObstacles">
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-            <label hidden>
-              <span>Room width</span>
-              <input id="roomWidth" type="number" min="5" max="14" step="0.5" value="8.5" />
-            </label>
-            <label hidden>
-              <span>Room depth</span>
-              <input id="roomDepth" type="number" min="5" max="14" step="0.5" value="7.5" />
-            </label>
-            <label hidden>
-              <span>Room height</span>
-              <input id="roomHeight" type="number" min="2.6" max="5" step="0.1" value="3.3" />
-            </label>
-            <label hidden>
-              <span>Furniture count</span>
-              <input id="furnitureCount" type="number" min="3" max="14" step="1" value="7" />
-            </label>
-            <label hidden>
-              <span>Vertical seed levels</span>
-              <input id="heightBands" type="number" min="2" max="8" step="1" value="4" />
-            </label>
-            <label hidden>
-              <span>Bootstrap scans</span>
-              <input id="bootstrapScans" type="number" min="1" max="12" step="1" value="6" />
-            </label>
             <label>
               <span>Safety radius</span>
               <input id="safetyRadius" type="number" min="0.2" max="1.4" step="0.05" value="0.42" />
             </label>
-            <label hidden>
-              <span>Goal reach radius</span>
-              <input id="goalReachRadius" type="number" min="0.1" max="0.9" step="0.05" value="0.28" />
-            </label>
-            <label hidden>
-              <span>Voxel resolution</span>
-              <input id="gridSize" type="number" min="0.45" max="1.6" step="0.05" value="0.9" />
+            <label>
+              <span>Terrain flight clearance</span>
+              <input id="terrainFlightClearance" type="number" min="2" max="18" step="0.5" value="6" />
             </label>
             <label>
               <span>Move speed</span>
@@ -262,6 +269,10 @@
             <div class="stat-card">
               <span>Comms</span>
               <strong id="commsReadout">0 links</strong>
+            </div>
+            <div class="stat-card">
+              <span>Budget</span>
+              <strong id="budgetReadout">Balanced</strong>
             </div>
           </div>
         </section>
