@@ -9,8 +9,15 @@ export class DroneAgent {
     this.position = position.clone();
     this.launchPosition = position.clone();
     this.velocity = new THREE.Vector3();
+    this.steeringVelocity = new THREE.Vector3();
+    this.smoothedTarget = position.clone();
     this.assignment = null;
     this.currentGoal = null;
+    this.behavior = {
+      sensingFocus: 'frontier',
+      communicationHealth: 1,
+      networkAnchor: null
+    };
     this.routeSamples = [];
     this.routeSampleIndex = 0;
     this.mailbox = [];
@@ -44,8 +51,12 @@ export class DroneAgent {
 
   assign(assignment) {
     this.assignment = assignment;
-    this.currentGoal = assignment?.goal ?? null;
+    this.currentGoal = assignment?.goal ?? assignment ?? null;
     this.status = assignment ? 'assigned' : 'idle';
+  }
+
+  updateBehavior(patch = {}) {
+    this.behavior = { ...this.behavior, ...patch };
   }
 
   enqueueMessage(message) {
@@ -75,6 +86,7 @@ export class DroneAgent {
       position: this.position.toArray(),
       launchPosition: this.launchPosition.toArray(),
       assignment: this.assignment,
+      behavior: this.behavior,
       metrics: { ...this.metrics }
     };
   }

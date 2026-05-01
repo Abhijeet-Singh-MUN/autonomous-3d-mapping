@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 import { clampInt } from '../core/math.js';
+import {
+  adaptiveNeighborTarget,
+  BEHAVIOR_PRIMITIVES,
+  computeControllerState,
+  computeBehaviorWeights,
+  DEFAULT_SWARM_BEHAVIOR_PROFILE,
+  roleCountTargets
+} from './behavior-profile.js';
 import { CommunicationGraph } from './communication-graph.js';
 import { DEFAULT_SWARM_CONFIG, DRONE_ROLES, FORMATION_MODES } from './constants.js';
 import { DroneAgent } from './drone-agent.js';
@@ -11,6 +19,7 @@ import { TerrainClassifier } from './terrain-classifier.js';
 export class SwarmController {
   constructor(config = {}) {
     this.config = { ...DEFAULT_SWARM_CONFIG, ...config };
+    this.behaviorProfile = config.behaviorProfile ?? DEFAULT_SWARM_BEHAVIOR_PROFILE;
     this.agents = [];
     this.communicationGraph = new CommunicationGraph({
       range: this.config.communicationRange,
@@ -18,9 +27,9 @@ export class SwarmController {
       dropout: this.config.communicationDropout,
       latencyMs: this.config.communicationLatencyMs
     });
-    this.formationGraph = new FormationGraph({ spacing: this.config.spacing });
+    this.formationGraph = new FormationGraph({ spacing: this.config.spacing, behaviorProfile: this.behaviorProfile });
     this.terrainClassifier = new TerrainClassifier();
-    this.taskAllocator = new TaskAllocator();
+    this.taskAllocator = new TaskAllocator({ behaviorProfile: this.behaviorProfile });
     this.mapFusion = new MapFusion();
     this.metrics = {
       coverage: 0,
@@ -28,7 +37,13 @@ export class SwarmController {
       pointSamples: 0,
       aoiCount: 0,
       connectedComponents: 0,
-      formationMode: FORMATION_MODES.ADAPTIVE
+      formationMode: FORMATION_MODES.ADAPTIVE,
+      behaviorWeights: computeBehaviorWeights({}, this.behaviorProfile),
+      normalizedSignals: {},
+      derivedControls: {},
+      dependencyGraph: [],
+      behaviorProfileVersion: this.behaviorProfile.version,
+      adaptiveNeighborTarget: this.config.maxNeighbors
     };
   }
 
@@ -62,18 +77,66 @@ export class SwarmController {
   }
 
   update({ requestedFormation = this.config.formationMode, environmentSignals = {}, frontiers = [], aois = [], relayTargets = [], linkValidator = null } = {}) {
+    this.communicationGraph.maxNeighbors = adaptiveNeighborTarget({
+      baseNeighbors: this.config.maxNeighbors,
+      communicationHealth: this.metrics.communicationHealth ?? 1,
+      aoiCount: aois.length,
+      frontierDensity: environmentSignals.frontierDensity ?? 0,
+      agentCount: this.agents.length
+    }, this.behaviorProfile);
     const communication = this.communicationGraph.update(this.agents, { canLink: linkValidator });
     const connectedComponents = communication.components.length;
     const communicationHealth = this.agents.length <= 1 ? 1 : 1 / Math.max(connectedComponents, 1);
+    const averageDegree = this.agents.length
+      ? (communication.edges.length * 2) / this.agents.length
+      : 0;
+    const localCommunicationHealth = Math.min(1, averageDegree / Math.max(this.communicationGraph.maxNeighbors, 1));
     const terrainClass = this.terrainClassifier.classify({
       ...environmentSignals,
       frontierDensity: environmentSignals.frontierDensity ?? frontiers.length / Math.max(this.agents.length * 8, 1),
       aoiCount: aois.length
     });
+    const measuredCommunicationHealth = Math.min(communicationHealth, localCommunicationHealth);
+    const controllerState = computeControllerState({
+      signals: {
+        ...environmentSignals,
+        communicationHealth: measuredCommunicationHealth,
+        aoiCount: aois.length
+      },
+      baseNeighbors: this.config.maxNeighbors,
+      agentCount: this.agents.length
+    }, this.behaviorProfile);
+    this.communicationGraph.maxNeighbors = controllerState.derivedControls.adaptiveNeighborTarget;
+    const behaviorWeights = controllerState.behaviorWeights;
+    const normalizedSignals = controllerState.normalizedSignals;
+    const derivedControls = controllerState.derivedControls;
+    const dependencyGraph = controllerState.dependencyGraph;
+    const roleSignals = {
+      ...environmentSignals,
+      communicationHealth: measuredCommunicationHealth,
+      aoiCount: aois.length
+    };
+    this.rebalanceRoles({
+      terrainClass,
+      communicationHealth: measuredCommunicationHealth,
+      frontierDensity: environmentSignals.frontierDensity ?? 0,
+      aoiCount: aois.length,
+      behaviorWeights,
+      normalizedSignals: roleSignals
+    });
+    this.updateAgentBehavior({
+      communication,
+      communicationHealth: measuredCommunicationHealth,
+      aoiCount: aois.length,
+      frontierDensity: environmentSignals.frontierDensity ?? 0,
+      behaviorWeights,
+      normalizedSignals,
+      derivedControls
+    });
     const formationMode = this.formationGraph.resolveMode({
       requestedMode: requestedFormation,
       terrainClass,
-      communicationHealth,
+      communicationHealth: measuredCommunicationHealth,
       aoiCount: aois.length,
       frontierDensity: environmentSignals.frontierDensity ?? 0
     });
@@ -93,6 +156,13 @@ export class SwarmController {
       aoiCount: aois.length,
       connectedComponents,
       formationMode,
+      communicationHealth: measuredCommunicationHealth,
+      behaviorWeights,
+      normalizedSignals,
+      derivedControls,
+      dependencyGraph,
+      behaviorProfileVersion: this.behaviorProfile.version,
+      adaptiveNeighborTarget: this.communicationGraph.maxNeighbors,
       pointSamples: this.mapFusion.exportPointTiles().reduce((sum, tile) => sum + tile.pointCount, 0)
     };
 
@@ -100,25 +170,94 @@ export class SwarmController {
       terrainClass,
       communication,
       formationMode,
+      behaviorWeights,
+      normalizedSignals,
+      derivedControls,
+      dependencyGraph,
       assignments,
       metrics: { ...this.metrics }
     };
   }
 
-  buildFormationTargets({ center = new THREE.Vector3(), heading = new THREE.Vector3(1, 0, 0), radius = 4 } = {}) {
+  rebalanceRoles({ terrainClass, communicationHealth, frontierDensity, aoiCount }) {
+    const count = this.agents.length;
+    if (!count) {
+      return;
+    }
+
+    const roleCounts = roleCountTargets({
+      count,
+      terrainClass,
+      communicationHealth,
+      frontierDensity,
+      aoiCount
+    }, this.behaviorProfile);
+    const desiredRoles = [
+      ...Array(roleCounts[DRONE_ROLES.RELAY]).fill(DRONE_ROLES.RELAY),
+      ...Array(roleCounts[DRONE_ROLES.VERIFIER]).fill(DRONE_ROLES.VERIFIER),
+      ...Array(roleCounts[DRONE_ROLES.SCOUT]).fill(DRONE_ROLES.SCOUT),
+      ...Array(roleCounts[DRONE_ROLES.MAPPER]).fill(DRONE_ROLES.MAPPER)
+    ];
+
+    this.agents.forEach((agent, index) => {
+      agent.setRole(desiredRoles[index] ?? DRONE_ROLES.MAPPER);
+    });
+  }
+
+  updateAgentBehavior({ communication, communicationHealth, aoiCount, frontierDensity, behaviorWeights, normalizedSignals, derivedControls }) {
+    const strongestNeighbors = new Map();
+    communication.edges.forEach((edge) => {
+      [
+        [edge.from, edge.to],
+        [edge.to, edge.from]
+      ].forEach(([from, to]) => {
+        const current = strongestNeighbors.get(from);
+        if (!current || edge.distance < current.distance) {
+          strongestNeighbors.set(from, { id: to, distance: edge.distance });
+        }
+      });
+    });
+
+    this.agents.forEach((agent) => {
+      const neighbor = strongestNeighbors.get(agent.id);
+      const aoiWeight = behaviorWeights?.[BEHAVIOR_PRIMITIVES.AOI] ?? 0;
+      const frontierWeight = behaviorWeights?.[BEHAVIOR_PRIMITIVES.FRONTIER] ?? 0;
+      const focus = agent.role === DRONE_ROLES.RELAY
+        ? 'network'
+        : agent.role === DRONE_ROLES.VERIFIER || (agent.role === DRONE_ROLES.MAPPER && (aoiCount > 0 || aoiWeight > 0.22))
+          ? 'aoi'
+          : frontierDensity > 0.02 || frontierWeight > 0.18
+            ? 'frontier'
+            : 'coverage';
+      agent.updateBehavior({
+        sensingFocus: focus,
+        communicationHealth,
+        networkAnchor: neighbor?.id ?? null,
+        behaviorWeights: behaviorWeights ? { ...behaviorWeights } : null,
+        normalizedSignals: normalizedSignals ? { ...normalizedSignals } : null,
+        derivedControls: derivedControls ? { ...derivedControls } : null
+      });
+    });
+  }
+
+  buildFormationTargets({ center = new THREE.Vector3(), heading = new THREE.Vector3(1, 0, 0), radius = 4, verticalSpan = this.config.verticalSpan ?? 2 } = {}) {
     return this.formationGraph.buildTargets({
       mode: this.metrics.formationMode,
       agents: this.agents,
       center,
       heading,
       radius,
-      verticalSpan: this.config.verticalSpan ?? 2
+      verticalSpan
     });
   }
 
   snapshot() {
     return {
       config: { ...this.config },
+      behaviorProfile: {
+        version: this.behaviorProfile.version,
+        objective: this.behaviorProfile.objectives.default
+      },
       agents: this.agents.map((agent) => agent.snapshot()),
       communication: this.communicationGraph.snapshot(),
       metrics: { ...this.metrics },

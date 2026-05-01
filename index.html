@@ -51,9 +51,12 @@
             <button id="startBtn" class="primary">Start</button>
             <button id="pauseBtn">Pause</button>
             <button id="continueBtn">Continue</button>
+            <button id="stopBtn">Stop</button>
             <button id="resetBtn">Reset</button>
             <button id="randomizeBtn">Randomize Terrain</button>
             <button id="exportBtn">Export PLY</button>
+            <button id="telemetryBtn">Telemetry</button>
+            <button id="algorithmBtn">Algorithm</button>
           </div>
 
           <div class="control-grid">
@@ -160,6 +163,17 @@
               </select>
             </label>
             <label>
+              <span>Objective profile</span>
+              <select id="objectiveProfile">
+                <option value="balanced_mapping" selected>Balanced mapping</option>
+                <option value="aoi_quality">AOI quality</option>
+                <option value="network_resilience">Network resilience</option>
+                <option value="coverage_exploration">Coverage exploration</option>
+                <option value="compute_efficiency">Compute efficiency</option>
+                <option value="energy_path_efficiency">Energy/path efficiency</option>
+              </select>
+            </label>
+            <label>
               <span>Visible point cap</span>
               <input id="visiblePointBudget" type="number" min="10000" max="1200000" step="25000" value="210000" />
             </label>
@@ -213,7 +227,7 @@
             </label>
             <label>
               <span>Per-drone H rays</span>
-              <input id="horizontalRays" type="number" min="4" max="48" step="1" value="12" />
+              <input id="horizontalRays" type="number" min="4" max="48" step="1" value="4" />
             </label>
             <label>
               <span>Per-drone V rays</span>
@@ -291,6 +305,90 @@
             <p>Swarm map, obstacle field, and coverage</p>
           </div>
           <canvas id="orbitCanvas" width="360" height="260"></canvas>
+        </section>
+
+        <section id="telemetryPanel" class="panel telemetry-panel" hidden>
+          <div class="panel-head">
+            <h2>Swarm Telemetry</h2>
+            <p>Persistent local run records and behavior metrics</p>
+          </div>
+          <div class="button-row button-row--split">
+            <button id="telemetryRefreshBtn">Refresh</button>
+            <button id="telemetryExportBtn">Export JSON</button>
+          </div>
+          <div class="telemetry-filters">
+            <label>
+              <span>Sort runs</span>
+              <select id="telemetrySort">
+                <option value="recent" selected>Most recent</option>
+                <option value="score">Best score</option>
+                <option value="aoiQuality">AOI quality</option>
+                <option value="coverage">Coverage</option>
+                <option value="networkResilience">Network resilience</option>
+                <option value="computeEfficiency">Compute efficiency</option>
+                <option value="energyProxy">Energy/path efficiency</option>
+                <option value="adaptationSmoothness">Adaptation smoothness</option>
+                <option value="constraintSafety">Constraint safety</option>
+                <option value="confidence">Score confidence</option>
+              </select>
+            </label>
+            <label>
+              <span>Scenario</span>
+              <select id="telemetryScenarioFilter">
+                <option value="all" selected>All AOIs</option>
+                <option value="auto">Auto</option>
+                <option value="village">Village</option>
+                <option value="structure">Structure</option>
+                <option value="aperture">Aperture</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input id="telemetryValidOnly" type="checkbox" />
+              <span>Valid only</span>
+            </label>
+          </div>
+          <div class="telemetry-summary">
+            <div class="stat-card">
+              <span>Saved runs</span>
+              <strong id="telemetryRunCount">0</strong>
+            </div>
+            <div class="stat-card">
+              <span>Valid runs</span>
+              <strong id="telemetryValidCount">0</strong>
+            </div>
+            <div class="stat-card">
+              <span>Latest hits</span>
+              <strong id="telemetryLatestHits">0</strong>
+            </div>
+          </div>
+          <div id="telemetryRuns" class="telemetry-runs"></div>
+        </section>
+
+        <section id="algorithmPanel" class="panel algorithm-panel" hidden>
+          <div class="panel-head">
+            <h2>Swarm Algorithm</h2>
+            <p>Live controller signals, weights, and derived controls</p>
+          </div>
+          <div class="algorithm-block">
+            <h3>Behavior Weights</h3>
+            <div id="algorithmWeights" class="metric-list"></div>
+          </div>
+          <div class="algorithm-block">
+            <h3>Normalized Signals</h3>
+            <div id="algorithmSignals" class="metric-list"></div>
+          </div>
+          <div class="algorithm-block">
+            <h3>Derived Controls</h3>
+            <div id="algorithmControls" class="metric-list"></div>
+          </div>
+          <div class="algorithm-block">
+            <h3>Role Counts</h3>
+            <div id="algorithmRoles" class="metric-list"></div>
+          </div>
+          <div class="algorithm-block">
+            <h3>Objective</h3>
+            <div id="algorithmObjective" class="metric-list"></div>
+          </div>
         </section>
 
         <section class="panel log-panel">

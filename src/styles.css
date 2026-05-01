@@ -169,6 +169,10 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.button-row--split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 button,
 select,
 input {
@@ -275,6 +279,124 @@ input {
   font-size: 0.9rem;
 }
 
+.telemetry-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.telemetry-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.telemetry-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.telemetry-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #a9b8dc;
+  font-size: 0.83rem;
+}
+
+.telemetry-filters .checkbox-label {
+  min-height: 38px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(150, 179, 255, 0.15);
+  border-radius: 8px;
+  background: rgba(12, 19, 34, 0.94);
+  white-space: nowrap;
+}
+
+.checkbox-label input {
+  min-height: 0;
+}
+
+.telemetry-run {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(13, 21, 38, 0.9);
+  border: 1px solid rgba(140, 170, 255, 0.12);
+}
+
+.telemetry-run strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.telemetry-run span {
+  display: block;
+  margin-top: 4px;
+  color: #9fb0d8;
+  font-size: 0.76rem;
+}
+
+.algorithm-block {
+  padding: 10px 0;
+  border-top: 1px solid rgba(140, 170, 255, 0.1);
+}
+
+.algorithm-block:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.algorithm-block h3 {
+  margin: 0 0 8px;
+  color: #dbe7ff;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.metric-list {
+  display: grid;
+  gap: 7px;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: minmax(86px, 1fr) minmax(58px, auto);
+  align-items: center;
+  gap: 10px;
+  color: #aabbe1;
+  font-size: 0.78rem;
+}
+
+.metric-row strong {
+  color: #eef4ff;
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.metric-bar {
+  grid-column: 1 / -1;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(120, 150, 210, 0.16);
+}
+
+.metric-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #57d6ff, #8ef8cf);
+}
+
 .cloud-overlay {
   position: fixed;
   right: 24px;
@@ -293,19 +415,39 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px 12px;
+  gap: 8px;
+  height: 74px;
+  padding: 10px 12px;
   cursor: move;
   user-select: none;
   border-bottom: 1px solid rgba(143, 172, 255, 0.12);
 }
 
+.cloud-header > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cloud-header h2,
+.cloud-header .eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .overlay-meta {
-  padding: 8px 10px;
+  flex: 0 0 min(220px, 58%);
+  max-width: min(220px, 58%);
+  padding: 8px 9px;
   border-radius: 8px;
   background: rgba(15, 24, 42, 0.92);
   color: #b9cbf1;
-  font-size: 0.85rem;
+  font-size: clamp(0.66rem, 1.7vw, 0.78rem);
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cloud-viewport {
@@ -342,6 +484,7 @@ input {
   }
 
   .button-row--wide,
+  .button-row--split,
   .control-grid,
   .stats-grid--wide {
     grid-template-columns: 1fr;

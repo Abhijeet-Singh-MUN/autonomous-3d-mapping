@@ -1,10 +1,13 @@
 import * as THREE from 'three';
+import { DEFAULT_SWARM_BEHAVIOR_PROFILE } from './behavior-profile.js';
 import { FORMATION_MODES, TERRAIN_CLASSES } from './constants.js';
 
 export class FormationGraph {
-  constructor({ spacing }) {
+  constructor({ spacing, behaviorProfile = DEFAULT_SWARM_BEHAVIOR_PROFILE }) {
     this.spacing = spacing;
+    this.behaviorProfile = behaviorProfile;
     this.currentMode = FORMATION_MODES.ADAPTIVE;
+    this.targetMemory = new Map();
   }
 
   resolveMode({ requestedMode, terrainClass, communicationHealth, aoiCount, frontierDensity }) {
@@ -13,13 +16,14 @@ export class FormationGraph {
       return requestedMode;
     }
 
-    if (communicationHealth < 0.72) {
+    const formation = this.behaviorProfile.formation;
+    if (communicationHealth < formation.weakCommunicationModeThreshold) {
       this.currentMode = FORMATION_MODES.RELAY_CHAIN;
     } else if (aoiCount > 0) {
       this.currentMode = FORMATION_MODES.PERIMETER_RING;
     } else if (terrainClass === TERRAIN_CLASSES.CORRIDOR || terrainClass === TERRAIN_CLASSES.DENSE_URBAN) {
       this.currentMode = FORMATION_MODES.WEDGE;
-    } else if (terrainClass === TERRAIN_CLASSES.SPARSE_OPEN && frontierDensity < 0.35) {
+    } else if (terrainClass === TERRAIN_CLASSES.SPARSE_OPEN && frontierDensity < formation.lineSweepMaxFrontierDensity) {
       this.currentMode = FORMATION_MODES.LINE_SWEEP;
     } else {
       this.currentMode = FORMATION_MODES.SCATTER;
@@ -37,19 +41,27 @@ export class FormationGraph {
 
     const side = new THREE.Vector3(-normalizedHeading.z, 0, normalizedHeading.x);
 
+    let targets;
     switch (mode) {
       case FORMATION_MODES.LINE_SWEEP:
-        return this.lineSweepTargets(agents, center, side, verticalSpan);
+        targets = this.lineSweepTargets(agents, center, side, verticalSpan);
+        break;
       case FORMATION_MODES.WEDGE:
-        return this.wedgeTargets(agents, center, normalizedHeading, side, verticalSpan);
+        targets = this.wedgeTargets(agents, center, normalizedHeading, side, verticalSpan);
+        break;
       case FORMATION_MODES.RELAY_CHAIN:
-        return this.relayChainTargets(agents, center, normalizedHeading, verticalSpan);
+        targets = this.relayChainTargets(agents, center, normalizedHeading, verticalSpan);
+        break;
       case FORMATION_MODES.PERIMETER_RING:
-        return this.perimeterRingTargets(agents, center, radius, verticalSpan);
+        targets = this.perimeterRingTargets(agents, center, radius, verticalSpan);
+        break;
       case FORMATION_MODES.SCATTER:
       default:
-        return this.scatterTargets(agents, center, radius, verticalSpan);
+        targets = this.scatterTargets(agents, center, radius, verticalSpan);
+        break;
     }
+
+    return this.smoothTargets(targets, mode);
   }
 
   lineSweepTargets(agents, center, side, verticalSpan) {
@@ -115,6 +127,24 @@ export class FormationGraph {
         droneId: agent.id,
         position: center.clone().add(new THREE.Vector3(Math.cos(angle) * distance, vertical, Math.sin(angle) * distance))
       };
+    });
+  }
+
+  smoothTargets(targets, mode) {
+    const retainedIds = new Set(targets.map((target) => target.droneId));
+    this.targetMemory.forEach((_, droneId) => {
+      if (!retainedIds.has(droneId)) {
+        this.targetMemory.delete(droneId);
+      }
+    });
+
+    const formation = this.behaviorProfile.formation;
+    const blend = mode === this.currentMode ? formation.targetBlendSameMode : formation.targetBlendModeChange;
+    return targets.map((target) => {
+      const previous = this.targetMemory.get(target.droneId);
+      const position = previous ? previous.clone().lerp(target.position, blend) : target.position.clone();
+      this.targetMemory.set(target.droneId, position.clone());
+      return { ...target, position };
     });
   }
 

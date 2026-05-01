@@ -2,6 +2,92 @@
 
 This log captures why changes are made, which issues they address, and what they unlock for the later README and research narrative.
 
+## 2026-05-02
+
+### Resource Metrics Scaffold
+
+- Added `src/swarm/resource-model.js` as the first explicit home for drone platform, battery, sensor, compute, and communication accounting.
+- Telemetry now stores hover, motion, sensor, compute, communication, total energy, and estimated battery remaining fields alongside the older path-length energy proxy.
+- Updated objective scoring so the energy/path component uses total estimated Wh when available, falling back to the older path proxy for existing runs.
+- Kept the new model clearly marked as placeholder calibration data; the schema is useful now, but the constants need a later sourced hardware pass before making real-world claims.
+- Restored the point-cloud overlay to show `shown / total pts` in the compact window header while shortening the text so small overlays are less likely to clip the total.
+
+### Temporal Evaluation Scaffold
+
+- Added per-sample temporal metrics for new voxels/sec, raw hits/sec, AOI hits/sec, focused hits/sec, path meters/sec, energy Wh/sec, compute Wh/sec, coverage gain/sec, behavior-weight change/sec, network fragmentation, and AOI-active seconds.
+- Finished runs now save a `temporalSummary` so comparison can use the shape of the run, not just the final totals.
+- Added `DEFAULT_SWARM_EVALUATION_PROFILE` to centralize scoring normalizers and validity thresholds.
+- Added `OPTIMIZER_PARAMETER_REGISTRY` with a deliberately small high-impact parameter set for future Bayesian optimization.
+- Updated objective scoring to blend final aggregates with temporal measures, including useful AOI hit rate after contact, coverage growth rate, network fragmented duration, energy/compute rate, and adaptation smoothness.
+
+### Soft Constraint Layer
+
+- Added normalized soft-constraint signals for AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure.
+- Wired risk pressure into the behavior mixture so close AOI work can increase avoidance/dodging pressure while still preserving AOI sensing pressure.
+- Added efficiency pressure from mission time, battery reserve, and compute load so the controller can reduce exploratory spread as constraints tighten.
+- Added temporal risk exposure and a `constraintSafety` score component so optimization can penalize risky behavior instead of only rewarding point accumulation.
+- Expanded the optimizer registry with first-pass constraint parameters for AOI risk gain, risk avoidance boost, and battery efficiency gain.
+
+### LiDAR Footprint Coverage Metrics
+
+- Added lightweight distance-scaled LiDAR footprint estimates for each ray hit without creating synthetic point-cloud samples.
+- The footprint radius is derived from ray distance and scan angular spacing, with tighter focused rays and clamped radius bounds.
+- Telemetry now records total footprint area, approximate unique footprint area, redundant footprint area, footprint redundancy ratio, and resolution score.
+- Coverage scoring now blends raw point-voxel growth with footprint area coverage and applies a redundancy penalty when drones repeatedly scan overlapping footprints.
+- Fed inter-drone footprint redundancy back into formation topology: high overlap expands area-coverage spacing, while low resolution creates a competing detail-tightening pressure.
+
+## 2026-05-01
+
+### Swarm Behavior Kernel V1
+
+- Added adaptive role rebalancing for scout, mapper, relay, and verifier drones from communication health, frontier density, terrain class, and AOI presence.
+- Expanded task allocation to score frontier, AOI, relay, and verification work with role-specific utilities and continuity bias.
+- Added relay waypoint generation between the launch/base side and current mission center so network-aware movement has explicit task anchors.
+- Smoothed formation topology with per-agent target memory and smoothed visible motion with velocity steering before terrain/object/drone/network constraints are applied.
+- Role-weighted AOI focus sensing now gives mappers and verifiers stronger close-range AOI sampling while relay drones keep lighter focus and preserve communication continuity.
+- Preserved the all-drone scanning contract: every active drone still casts its base LiDAR fan on every swarm scan pass.
+
+### Swarm Algorithm Reasoning Record
+
+- Added `SWARM_ALGORITHM.md` as the canonical design/rationale file for the swarm controller math, parameter dependency model, optimization direction, and reasoning history.
+- Recorded the discussion progression from fixed formation/AOI comparisons to persistent evaluation datasets with normalized metrics and bad-run filtering.
+- Documented the decision that 9x neighbor-point generation should be derived reconstruction, not raw LiDAR evidence.
+- Reframed fixed modes as baselines or behavior primitives inside a future continuous mixture-of-behaviors controller.
+- Documented the parameter dependency rule: nested dependencies are acceptable only when explicit, directional, logged, and acyclic within a single timestep.
+- Clarified that optimization should tune parameter profiles offline while runtime behavior remains locally adaptive to terrain, AOIs, communication health, and safety constraints.
+- Captured the optimizer direction: manual comparisons first, random or Latin-hypercube sampling for sensitivity baselines, Bayesian optimization once the parameter set is reduced, PSO when larger simulation budgets allow, and RL only after metrics and datasets mature.
+
+### Behavior Profile Registry
+
+- Added `src/swarm/behavior-profile.js` as the first central parameter registry for swarm behavior constants.
+- Moved role-balance shares, behavior-mixture weights, task scoring weights, movement smoothing, role speed scales, network envelope gains, AOI focus multipliers, relay waypoint settings, formation thresholds, and objective profiles into the registry.
+- Wired the swarm controller, task allocator, formation graph, and mission-loop helper functions to read from the behavior profile instead of isolated literals.
+- Added normalized behavior weights and adaptive neighbor target metrics to the swarm controller snapshot so future telemetry can record the controller state alongside run outcomes.
+- Added an explicit controller-state pipeline that records normalized signals, behavior weights, derived controls, and the same-timestep dependency graph.
+- Connected derived controls to formation spread, role speed, assignment blending, AOI focus scale, and network compliance so the continuous behavior mixture now affects runtime actions.
+- Added a live Algorithm panel for inspecting behavior weights, normalized signals, derived controls, role counts, and the active objective profile.
+- Added objective-weighted run scoring for AOI quality, coverage, network resilience, time efficiency, compute efficiency, and energy/path proxy. Invalid runs stay saved but have their competitive total score suppressed.
+- Added objective-profile selection plus telemetry sorting/filtering so saved runs can be compared by total score, confidence, AOI scenario, validity, or individual subscores under the current objective.
+- Expanded score records with raw measures, normalization targets, performance aggregates, and additional objectives for coverage exploration, compute efficiency, and energy/path efficiency.
+- Stabilized the point-cloud overlay readout by showing a compact total point count in a fixed-width header area, with visible/total detail preserved in the tooltip.
+
+### Persistent Swarm Telemetry
+
+- Added `src/swarm/run-telemetry.js` with IndexedDB-backed run records for swarm simulation telemetry.
+- Swarm missions now start a telemetry run, sample behavior weights/network/AOI/path metrics over time, accumulate raw ray/hit/focused/AOI scan totals, and save the run on reset or completion.
+- Added validity flags for insufficient scan time, target not reached, insufficient AOI dwell, low raw AOI coverage, and unstable performance.
+- Added a `Telemetry` sidebar panel that lists saved runs, shows basic aggregate counts, and exports run records as JSON.
+- Kept the live point cloud raw-only in `sim.voxelMap` after testing the runtime sensor-footprint splat prototype.
+- Deferred 9-neighbor/footprint splatting to a future post-scan reconstruction step so synthetic density does not run inside the real-time sensor loop.
+- PLY export remains raw-only for measurement integrity.
+- Corrected telemetry lifecycle so pause/resume keeps one open run; reset or completion saves it.
+- Split live-tunable controls from experiment-defining controls so formation, communication, scan-density, and performance changes no longer reinitialize the swarm over an existing point cloud. Experiment-defining terrain/AOI/swarm-size changes save the previous run and clear the map first.
+- Added a Stop button that finalizes the current run, saves telemetry, and leaves the point cloud available for inspection/export without resetting.
+- Removed runtime derived-splat maps, active-derived counters, raw-covered cache bookkeeping, and AOI scan throttles from the splat experiment.
+- Restored the previous valley aperture object-field prop placement after the circular layout made the AOI read worse visually.
+- Set the default Light swarm scan preset to four horizontal rays and four vertical rays per drone for easier inspection and lower default point-cloud churn.
+- Restored the softer AOI local-Z color variation after the sharper red ramp proved too harsh in the raw point cloud.
+
 ## 2026-04-27
 
 ### Branch and baseline

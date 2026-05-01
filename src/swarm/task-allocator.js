@@ -1,17 +1,22 @@
-import { DRONE_ROLES } from './constants.js';
-
-const ROLE_WEIGHTS = {
-  [DRONE_ROLES.SCOUT]: { frontier: 1.4, aoi: 0.7, relay: 0.4 },
-  [DRONE_ROLES.MAPPER]: { frontier: 0.9, aoi: 1.25, relay: 0.35 },
-  [DRONE_ROLES.RELAY]: { frontier: 0.4, aoi: 0.4, relay: 1.5 },
-  [DRONE_ROLES.VERIFIER]: { frontier: 0.55, aoi: 1.45, relay: 0.3 }
-};
+import { DEFAULT_SWARM_BEHAVIOR_PROFILE } from './behavior-profile.js';
 
 export class TaskAllocator {
+  constructor({ behaviorProfile = DEFAULT_SWARM_BEHAVIOR_PROFILE } = {}) {
+    this.behaviorProfile = behaviorProfile;
+  }
+
   assign({ agents, frontiers = [], aois = [], relayTargets = [] }) {
+    const scoring = this.behaviorProfile.taskScoring;
     const tasks = [
       ...frontiers.map((frontier) => ({ ...frontier, type: 'frontier' })),
       ...aois.map((aoi) => ({ ...aoi, type: 'aoi' })),
+      ...aois.map((aoi) => ({
+        ...aoi,
+        id: `${aoi.id}-verify`,
+        type: 'verify',
+        priority: (aoi.priority ?? 1) * scoring.verifyPriorityScale,
+        informationGain: (aoi.informationGain ?? 1) * scoring.verifyInformationGainScale
+      })),
       ...relayTargets.map((relay) => ({ ...relay, type: 'relay' }))
     ];
     const available = [...tasks];
@@ -35,11 +40,22 @@ export class TaskAllocator {
     let bestScore = -Infinity;
 
     tasks.forEach((task) => {
-      const weight = ROLE_WEIGHTS[agent.role]?.[task.type] ?? 1;
+      const scoring = this.behaviorProfile.taskScoring;
+      const weight = scoring.roleWeights[agent.role]?.[task.type] ?? 1;
       const priority = task.priority ?? 1;
       const informationGain = task.informationGain ?? 0;
       const distance = task.position ? agent.position.distanceTo(task.position) : 0;
-      const score = priority * weight + informationGain * 0.35 - distance * 0.08;
+      const continuity = agent.currentGoal?.id === task.id ? scoring.continuityBias : 0;
+      const communicationNeed = agent.behavior?.communicationHealth < scoring.weakCommunicationThreshold && task.type === 'relay'
+        ? scoring.communicationRelayBonus
+        : 0;
+      const score = (
+        priority * weight +
+        informationGain * scoring.informationGainWeight +
+        continuity +
+        communicationNeed -
+        distance * scoring.distancePenalty
+      );
 
       if (score > bestScore) {
         best = task;

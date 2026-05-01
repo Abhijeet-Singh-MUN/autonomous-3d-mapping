@@ -22,6 +22,8 @@ src/
     planner.js         3D graph search over voxel state points
     voxel-grid.js      Voxel graph storage and world/grid transforms
   swarm/
+    behavior-profile.js
+                       Parameter registry, behavior-weight math, objective profiles
     constants.js       Swarm roles, formation modes, terrain classes, AOI types
     drone-agent.js     Per-drone state container for roles, route, messages, observations
     communication-graph.js
@@ -31,6 +33,8 @@ src/
                        Terrain/problem classifier for adaptive behavior
     task-allocator.js  Utility-based drone-to-task assignment
     map-fusion.js      Point-cloud tile and replay-log aggregation scaffolding
+    resource-model.js  First-pass drone energy/compute/sensor accounting model
+    run-telemetry.js   IndexedDB run records for behavior/scan/network metrics
     swarm-controller.js
                        Facade for agents, communication, formation, allocation, fusion
 ```
@@ -76,6 +80,12 @@ Current Swarm V1 preview:
 - Drone-drone, drone-object, and terrain-clearance envelopes keep preview drones separated from each other, known objects, and the mountain surface.
 - Swarm drones run budgeted local ray scans, add hits to the point cloud, and record per-agent observations for map-fusion scaffolding.
 - Swarm motion now applies a communication envelope so drones are pulled back toward their nearest reliable neighbors before links are rendered.
+- Swarm Behavior Kernel V1 rebalances scout, mapper, relay, and verifier roles from frontier pressure, AOI presence, terrain class, and communication health.
+- Role-aware task allocation now includes frontier, AOI, relay, and verification tasks, with relay waypoints laid between launch/base and the active mission center.
+- Formation targets and drone movement are smoothed with per-agent target memory and velocity steering before terrain, object, drone, and network constraints are applied.
+- `Telemetry` opens a local run-history panel backed by IndexedDB; swarm runs are saved on Stop, reset, or completion with behavior, scan, AOI, network, and validity metrics. Pause/Continue keeps the same run open.
+- `Algorithm` opens a live controller panel showing behavior weights, normalized signals, derived controls, role counts, and the active objective profile.
+- `Objective profile` changes how runs are scored for comparison: balanced mapping, AOI quality, network resilience, coverage exploration, compute efficiency, or energy/path efficiency.
 - This slice previews swarm topology, launch behavior, heuristic sensing, and mission state; full shared voxel fusion and robust planner integration are next-stage work.
 - The terrain sandbox is scaled up with taller mountains, a wider valley corridor, larger village spacing, trees, a complex building AOI, and a hoop-like aperture object field to make 3D swarm behavior testable at a more realistic scale.
 - Terrain mode uses a much wider outdoor camera fog range so distant mountains and valley features remain visible before zooming in.
@@ -88,6 +98,21 @@ Adaptive algorithm direction:
 - LiDAR/radar-style heuristics should estimate openness, aperture size, vertical clearance, obstacle density, AOI value, and communication health.
 - The swarm should act like one distributed organism: each drone senses locally, shares compact state with nearest neighbors, and adapts the group topology from partial knowledge.
 - Motion should remain smooth even when voxel planning is used underneath. Curves, velocity limits, separation, and collision constraints should translate graph decisions into flight paths.
+- The first behavior-kernel slice keeps all drones sensing on every scan pass, while mappers/verifiers receive stronger AOI focus rays and relay drones favor network continuity.
+
+Swarm algorithm direction:
+
+- The swarm is moving toward a continuous mixture-of-behaviors controller rather than a set of hard fixed modes.
+- Behavior weights will be computed from normalized terrain, AOI, communication, coverage, and mission-progress signals.
+- The current controller now logs normalized signals and derives bounded controls for formation spread, movement speed, assignment pull, AOI focus, and network compliance from those behavior weights.
+- Soft constraints now feed the controller as normalized signals: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They can raise avoidance/efficiency behavior without replacing the AOI, coverage, and relay objectives.
+- Saved runs are scored with the active objective profile across AOI quality, coverage, network resilience, time efficiency, compute efficiency, energy/path proxy, adaptation smoothness, and constraint safety. Scoring also stores raw measures, temporal measures, normalization targets, and confidence metadata.
+- Telemetry now stores first-pass resource fields for hover, motion, sensor, compute, communication, total energy, and estimated battery remaining. The current values are placeholder simulation estimates until calibrated from sourced platform and sensor data.
+- Telemetry samples now include temporal rate metrics such as new voxels per second, AOI hits per second after contact, energy/compute rate, network fragmentation duration, and behavior-weight change rate. Run scores can therefore use curve-derived behavior, not only final totals.
+- LiDAR area coverage is estimated separately from raw point storage. Each hit contributes a distance-scaled footprint radius for coverage/resolution/redundancy metrics, but it does not create synthetic point-cloud samples.
+- Inter-drone footprint redundancy now feeds back into formation spacing: overlapping LiDAR footprints increase area-spread pressure, while low footprint resolution can tighten spacing for detail.
+- Telemetry can sort saved runs by score, confidence, or subscore, filter to valid runs only, and filter by AOI scenario.
+- `SWARM_ALGORITHM.md` is the detailed design rationale for the math, parameter dependencies, optimization direction, and reasoning history behind this approach.
 
 Formation notes:
 
@@ -161,6 +186,7 @@ npm run preview
 - `Dwell / scan interval`: timing knob retained for mission update cadence.
 - AOI capture adds a focused scan cone only when drones are close to an AOI, so buildings and valley object fields receive denser point samples without globally increasing every terrain ray.
 - AOI focus rays are distributed across wider Z-depth lanes and nearby X/Y offsets inside the AOI/object-field area instead of aiming at the visual AOI marker.
+- The live point cloud is raw LiDAR voxel evidence only. The 9-neighbor/footprint-splat idea is deferred to a post-scan reconstruction step so synthetic density does not slow the real-time swarm loop or affect scan telemetry. PLY export currently uses raw points only.
 
 Current limits:
 

@@ -6,7 +6,17 @@ import { CELL_FREE, CELL_OCCUPIED, CELL_UNKNOWN, SENSOR_PRESETS } from './core/c
 import { VoxelGrid } from './core/voxel-grid.js';
 import { searchPath3D as runVoxelPlanner } from './core/planner.js';
 import { almostEqual, clamp, clampInt, createRng, generateSeed, lerp, readNumber } from './core/math.js';
-import { FORMATION_MODES, SwarmController } from './swarm/index.js';
+import {
+  DEFAULT_DRONE_RESOURCE_MODEL,
+  DEFAULT_SWARM_BEHAVIOR_PROFILE,
+  DEFAULT_SWARM_EVALUATION_PROFILE,
+  DRONE_ROLES,
+  FORMATION_MODES,
+  estimateSwarmResourceUse,
+  scoreSwarmRun,
+  SwarmController,
+  SwarmRunTelemetry
+} from './swarm/index.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -22,9 +32,28 @@ const els = {
   startBtn: document.querySelector('#startBtn'),
   pauseBtn: document.querySelector('#pauseBtn'),
   continueBtn: document.querySelector('#continueBtn'),
+  stopBtn: document.querySelector('#stopBtn'),
   resetBtn: document.querySelector('#resetBtn'),
   randomizeBtn: document.querySelector('#randomizeBtn'),
   exportBtn: document.querySelector('#exportBtn'),
+  telemetryBtn: document.querySelector('#telemetryBtn'),
+  algorithmBtn: document.querySelector('#algorithmBtn'),
+  telemetryPanel: document.querySelector('#telemetryPanel'),
+  telemetryRefreshBtn: document.querySelector('#telemetryRefreshBtn'),
+  telemetryExportBtn: document.querySelector('#telemetryExportBtn'),
+  telemetrySort: document.querySelector('#telemetrySort'),
+  telemetryScenarioFilter: document.querySelector('#telemetryScenarioFilter'),
+  telemetryValidOnly: document.querySelector('#telemetryValidOnly'),
+  telemetryRunCount: document.querySelector('#telemetryRunCount'),
+  telemetryValidCount: document.querySelector('#telemetryValidCount'),
+  telemetryLatestHits: document.querySelector('#telemetryLatestHits'),
+  telemetryRuns: document.querySelector('#telemetryRuns'),
+  algorithmPanel: document.querySelector('#algorithmPanel'),
+  algorithmWeights: document.querySelector('#algorithmWeights'),
+  algorithmSignals: document.querySelector('#algorithmSignals'),
+  algorithmControls: document.querySelector('#algorithmControls'),
+  algorithmRoles: document.querySelector('#algorithmRoles'),
+  algorithmObjective: document.querySelector('#algorithmObjective'),
   missionMode: document.querySelector('#missionMode'),
   environmentMode: document.querySelector('#environmentMode'),
   aoiPreset: document.querySelector('#aoiPreset'),
@@ -35,6 +64,7 @@ const els = {
   communicationDropout: document.querySelector('#communicationDropout'),
   swarmScanDensity: document.querySelector('#swarmScanDensity'),
   performanceBudget: document.querySelector('#performanceBudget'),
+  objectiveProfile: document.querySelector('#objectiveProfile'),
   visiblePointBudget: document.querySelector('#visiblePointBudget'),
   renderScaleBudget: document.querySelector('#renderScaleBudget'),
   terrainWidth: document.querySelector('#terrainWidth'),
@@ -127,6 +157,9 @@ const sim = {
   swarmController: null,
   swarmTargets: [],
   swarmSnapshot: null,
+  swarmTelemetry: new SwarmRunTelemetry(),
+  droneResourceModel: DEFAULT_DRONE_RESOURCE_MODEL,
+  swarmTelemetryElapsedMs: 0,
   swarmLaunchElapsedMs: 0,
   swarmScanElapsedMs: 0,
   commsRenderElapsedMs: 0,
@@ -134,6 +167,12 @@ const sim = {
   graphRenderElapsedMs: 0,
   cloudDirty: false,
   voxelMap: new Map(),
+  footprintCoverageMap: new Map(),
+  footprintMetrics: {
+    redundancyRatio: 0,
+    resolutionScore: 0,
+    uniqueAreaRate: 0
+  },
   performance: {
     frameAvgMs: 16,
     loadScale: 1,
@@ -378,7 +417,23 @@ function createSwarmDroneMesh(role, index) {
   });
   drone.scale.setScalar(0.84);
   drone.userData.role = role;
+  drone.userData.swarmIndex = index;
   return drone;
+}
+
+function refreshSwarmDroneRoleVisual(agent) {
+  if (!agent.mesh || agent.mesh.userData.role === agent.role) {
+    return;
+  }
+  const color = roleColor(agent.role);
+  const index = agent.mesh.userData.swarmIndex ?? 0;
+  agent.mesh.traverse((child) => {
+    if (!child.isMesh || !child.material?.color) {
+      return;
+    }
+    child.material.color.set(index === 0 ? '#f4f8ff' : color);
+  });
+  agent.mesh.userData.role = agent.role;
 }
 
 function createPointCloud() {
@@ -391,17 +446,26 @@ function setupUI() {
   els.startBtn.addEventListener('click', () => startMission());
   els.pauseBtn.addEventListener('click', () => pauseMission());
   els.continueBtn.addEventListener('click', () => continueMission());
+  els.stopBtn.addEventListener('click', () => stopMission());
   els.resetBtn.addEventListener('click', () => resetMission(true, false));
   els.randomizeBtn.addEventListener('click', () => {
-    regenerateEnvironment(true);
     resetMission(false, false);
+    regenerateEnvironment(true);
+    syncSwarmMode();
     logMessage(`Terrain sandbox randomized. Seed ${sim.environmentSeed}.`);
   });
   els.exportBtn.addEventListener('click', () => exportPointCloudAsPly());
+  els.telemetryBtn.addEventListener('click', () => toggleTelemetryPanel());
+  els.algorithmBtn.addEventListener('click', () => toggleAlgorithmPanel());
+  els.telemetryRefreshBtn.addEventListener('click', () => refreshTelemetryPanel());
+  els.telemetryExportBtn.addEventListener('click', () => exportTelemetryRuns());
+  els.telemetrySort.addEventListener('change', () => refreshTelemetryPanel());
+  els.telemetryScenarioFilter.addEventListener('change', () => refreshTelemetryPanel());
+  els.telemetryValidOnly.addEventListener('change', () => refreshTelemetryPanel());
 
   els.sensorPreset.addEventListener('change', () => {
+    resetMissionForControlChange('Sensor preset changed; previous run saved and map cleared.');
     applySensorPreset(true);
-    resetMission(false, false);
     logMessage(`Sensor preset set to ${SENSOR_PRESETS[els.sensorPreset.value].label}.`);
   });
 
@@ -415,8 +479,9 @@ function setupUI() {
     els.treeCount
   ].forEach((input) => {
     input.addEventListener('change', () => {
+      resetMissionForControlChange('Terrain controls changed; previous run saved and map cleared.');
       regenerateEnvironment(false);
-      resetMission(false, false);
+      syncSwarmMode();
       logMessage('Terrain generation updated from the controls.');
     });
   });
@@ -430,8 +495,8 @@ function setupUI() {
     els.terrainVoxelResolution
   ].forEach((input) => {
     input.addEventListener('change', () => {
+      resetMissionForControlChange('Mapping or clearance controls changed; previous run saved and map cleared.');
       initializeMapper();
-      resetMission(false, false);
       logMessage('Swarm mapping and clearance settings updated.');
     });
   });
@@ -442,6 +507,7 @@ function setupUI() {
         if (input === els.horizontalRays || input === els.verticalRays) {
           els.swarmScanDensity.value = 'custom';
         }
+        noteTelemetryControlChange(input.id);
         refreshStatus();
         drawMissionGraph();
       });
@@ -457,27 +523,44 @@ function setupUI() {
   });
 
   [
-    els.missionMode,
-    els.swarmSize,
-    els.swarmFormation,
     els.communicationRange,
     els.communicationNeighbors,
     els.communicationDropout,
-    els.swarmScanDensity,
-    els.performanceBudget,
-    els.environmentMode,
-    els.aoiPreset
+    els.swarmFormation
   ].forEach((input) => {
+    input.addEventListener('change', () => {
+      applyLiveSwarmConfigChange(input);
+      refreshStatus();
+      drawMissionGraph();
+    });
+  });
+
+  [els.swarmScanDensity, els.performanceBudget].forEach((input) => {
     input.addEventListener('change', () => {
       if (input === els.swarmScanDensity) {
         applySwarmScanDensityPreset();
+        noteTelemetryControlChange('scan-density');
       }
       if (input === els.performanceBudget) {
         applyPerformanceBudget(true);
+        noteTelemetryControlChange('performance-budget');
       }
+      refreshStatus();
+      drawMissionGraph();
+    });
+  });
+
+  els.objectiveProfile.addEventListener('change', () => {
+    applyObjectiveProfileChange();
+    refreshStatus();
+    refreshTelemetryPanel();
+  });
+
+  [els.missionMode, els.swarmSize, els.environmentMode, els.aoiPreset].forEach((input) => {
+    input.addEventListener('change', () => {
+      resetMissionForControlChange('Experiment-defining swarm controls changed; previous run saved and map cleared.');
       if (input === els.environmentMode || input === els.aoiPreset) {
         regenerateEnvironment(false);
-        resetMission(false, false);
       }
       syncSwarmMode();
       refreshStatus();
@@ -685,6 +768,44 @@ function applyPerformanceBudget(writeInputs) {
   }
   setRendererScale(preset.renderScale);
   updatePointReadouts();
+}
+
+function resetMissionForControlChange(message) {
+  if (sim.missionStarted || sim.status === 'paused') {
+    resetMission(false, false);
+    logMessage(message);
+    return true;
+  }
+  return false;
+}
+
+function applyLiveSwarmConfigChange(input) {
+  if (input === els.swarmFormation) {
+    noteTelemetryControlChange('formation');
+  }
+  if (!sim.swarmController) {
+    syncSwarmMode();
+    return;
+  }
+
+  const communicationRange = clamp(readNumber(els.communicationRange), 2, 80);
+  const maxNeighbors = clampInt(readNumber(els.communicationNeighbors), 1, 8);
+  const dropout = clamp(readNumber(els.communicationDropout), 0, 0.45);
+  sim.swarmController.config.communicationRange = communicationRange;
+  sim.swarmController.config.maxNeighbors = maxNeighbors;
+  sim.swarmController.config.communicationDropout = dropout;
+  sim.swarmController.config.formationMode = els.swarmFormation.value;
+  sim.swarmController.communicationGraph.range = communicationRange;
+  sim.swarmController.communicationGraph.maxNeighbors = maxNeighbors;
+  sim.swarmController.communicationGraph.dropout = dropout;
+  noteTelemetryControlChange(input.id);
+}
+
+function noteTelemetryControlChange(controlName) {
+  if (!sim.swarmTelemetry?.active) {
+    return;
+  }
+  sim.swarmTelemetry.addNote?.(`Control changed during run: ${controlName}.`);
 }
 
 function setRendererScale(renderScale) {
@@ -1569,6 +1690,7 @@ function buildBootstrapPlan() {
 }
 
 function resetMission(writeLog, clearLogs) {
+  finalizeSwarmTelemetry('reset');
   sim.droneActive = false;
   sim.status = 'idle';
   sim.complete = false;
@@ -1620,6 +1742,12 @@ function resetMission(writeLog, clearLogs) {
 
 function clearPointCloud() {
   sim.voxelMap.clear();
+  sim.footprintCoverageMap.clear();
+  sim.footprintMetrics = {
+    redundancyRatio: 0,
+    resolutionScore: 0,
+    uniqueAreaRate: 0
+  };
   sim.pointCount = 0;
   sim.cloudDirty = false;
   sim.performance.displayedPointCount = 0;
@@ -1648,6 +1776,7 @@ function startMission() {
     sim.scanCounter = 0;
     sim.pointCount = 0;
     sim.swarmLaunchElapsedMs = 0;
+    sim.swarmTelemetryElapsedMs = 0;
     sim.swarmScanElapsedMs = 0;
     sim.commsRenderElapsedMs = 0;
     sim.cloudFlushElapsedMs = 0;
@@ -1655,6 +1784,7 @@ function startMission() {
     main.pathGroup.clear();
     main.beamGroup.clear();
     initializeSwarm();
+    startSwarmTelemetryRun();
     refreshStatus();
     drawMissionGraph();
     logMessage(
@@ -1707,7 +1837,7 @@ function pauseMission() {
   sim.droneActive = false;
   sim.status = 'paused';
   refreshStatus();
-  logMessage('Mission paused.');
+  logMessage('Mission paused. Telemetry remains open and will save on Reset or completion.');
 }
 
 function continueMission() {
@@ -1718,6 +1848,20 @@ function continueMission() {
   sim.status = 'running';
   refreshStatus();
   logMessage('Mission resumed.');
+}
+
+function stopMission() {
+  if (!sim.missionStarted || sim.complete) {
+    return;
+  }
+  sim.droneActive = false;
+  sim.complete = true;
+  sim.status = 'complete';
+  sim.currentPhase = 'complete';
+  finalizeSwarmTelemetry('stopped');
+  refreshStatus();
+  drawMissionGraph();
+  logMessage('Mission stopped. Telemetry saved; point cloud remains available for inspection and export.');
 }
 
 function animate(time) {
@@ -2162,7 +2306,7 @@ function performSensorScan(scanContext) {
 
       const hit = intersections[0];
       updateMapperAlongRay(temp.source, temp.dir, hit.distance, sensor.maxRange, true);
-      addPointToCloud(hit.point, hit.distance);
+      addPointToCloud(hit.point, hit.distance, {}, hit);
       hits += 1;
 
       if (beamIndex % beamStride === 0) {
@@ -2388,6 +2532,7 @@ function finishMission() {
     return;
   }
   sim.droneActive = false;
+  finalizeSwarmTelemetry('complete');
   sim.complete = true;
   sim.status = 'complete';
   sim.currentPhase = 'complete';
@@ -2410,6 +2555,9 @@ function syncSwarmMode() {
   main.commGroup.visible = enabled;
 
   if (enabled) {
+    if (sim.missionStarted && sim.swarmController) {
+      return;
+    }
     initializeSwarm();
     logMessage('Swarm V1 preview enabled. Single-drone planner remains preserved as the baseline mode.');
   } else {
@@ -2466,11 +2614,13 @@ function updateSwarmPreview(deltaSeconds) {
       sim.commsRenderElapsedMs = 0;
       renderCommunicationGraph(idleSnapshot.communication.edges);
     }
+    sim.swarmController.agents.forEach(refreshSwarmDroneRoleVisual);
     sim.swarmSnapshot = sim.swarmController.snapshot();
     return;
   }
 
   sim.swarmLaunchElapsedMs += deltaSeconds * 1000;
+  sim.swarmTelemetryElapsedMs += deltaSeconds * 1000;
   sim.swarmScanElapsedMs += deltaSeconds * 1000;
   sim.commsRenderElapsedMs += deltaSeconds * 1000;
   sim.cloudFlushElapsedMs += deltaSeconds * 1000;
@@ -2485,6 +2635,7 @@ function updateSwarmPreview(deltaSeconds) {
   const obstacleDensity = sim.mapper ? sim.mapper.occupiedCount / Math.max(sim.mapper.knownCount, 1) : 0;
   const terrainSignals = sim.terrainProfile ?? {};
   const activeAois = selectedAoiTargets();
+  const constraintSignals = swarmConstraintSignals(activeAois);
   const snapshot = sim.swarmController.update({
     requestedFormation: els.swarmFormation.value,
     environmentSignals: {
@@ -2493,18 +2644,21 @@ function updateSwarmPreview(deltaSeconds) {
       verticality: terrainSignals.verticality ?? (sim.ceilingHazard ? 0.42 : 0.12),
       occlusion: terrainSignals.corridorScore ? 0.48 : obstacleDensity * 0.8,
       corridorScore: terrainSignals.corridorScore ?? (sim.room && sim.room.depth > sim.room.width * 1.25 ? 0.72 : 0.2),
-      openness: estimateSwarmOpenness()
+      openness: estimateSwarmOpenness(),
+      scanProgress: clamp(sim.scanCounter / 180, 0, 1),
+      ...constraintSignals
     },
     frontiers: sampleSwarmFrontierTasks(18),
     aois: activeAois,
-    relayTargets: [],
+    relayTargets: sampleSwarmRelayTasks(center),
     linkValidator: hasTerrainLineOfSight
   });
 
   sim.swarmTargets = sim.swarmController.buildFormationTargets({
     center,
     heading: new THREE.Vector3(0, 0, 1),
-    radius: Math.max(sim.room.width, sim.room.depth) * 0.18
+    radius: Math.max(sim.room.width, sim.room.depth) * 0.18 * (snapshot.metrics.derivedControls?.formationRadiusScale ?? 1),
+    verticalSpan: Math.max(0.8, sim.room.height * 0.28) * (snapshot.metrics.derivedControls?.formationVerticalScale ?? 1)
   });
 
   const launchProgress = clamp(sim.swarmLaunchElapsedMs / 3600, 0, 1);
@@ -2518,16 +2672,10 @@ function updateSwarmPreview(deltaSeconds) {
     const takeoffTarget = agent.launchPosition.clone();
     takeoffTarget.y = terrainClearanceY(takeoffTarget.x, takeoffTarget.z, terrainCruiseClearance() * launchProgress);
     const activeTarget = launchProgress < 1 ? takeoffTarget : terrainAwareTarget(target.position, agent);
-    const next = agent.position.clone();
-    temp.travel.copy(activeTarget).sub(next);
-    const distance = temp.travel.length();
-    if (distance > speed && speed > 0) {
-      temp.travel.normalize().multiplyScalar(speed);
-      next.add(temp.travel);
-    } else {
-      next.copy(activeTarget);
-    }
+    const next = smoothSwarmAgentStep(agent, activeTarget, speed, deltaSeconds);
+    const distance = agent.position.distanceTo(activeTarget);
     agent.setPosition(next);
+    refreshSwarmDroneRoleVisual(agent);
     if (agent.mesh && distance > 0.01) {
       agent.mesh.lookAt(activeTarget);
     }
@@ -2546,7 +2694,225 @@ function updateSwarmPreview(deltaSeconds) {
     flushPointCloudGeometry(Math.max(38, clamp(readNumber(els.maxRange), 2, 80)));
   }
   sim.swarmSnapshot = sim.swarmController.snapshot();
+  renderAlgorithmPanel();
+  recordSwarmTelemetrySample(activeAois);
   sim.currentPhase = launchProgress < 1 ? 'launch' : 'swarm';
+}
+
+function swarmConstraintSignals(activeAois = selectedAoiTargets()) {
+  const agents = sim.swarmController?.agents ?? [];
+  const nearestAoiDistance = nearestSwarmAoiDistance(activeAois, agents);
+  const nearestAoiRadius = activeAois.length
+    ? activeAois.reduce((nearest, aoi) => {
+        const distance = agents.length
+          ? Math.min(...agents.map((agent) => agent.position.distanceTo(aoi.position)))
+          : Infinity;
+        return distance < nearest.distance ? { distance, radius: aoi.radius ?? 1 } : nearest;
+      }, { distance: Infinity, radius: 1 }).radius
+    : 1;
+  const aoiProximityRisk = Number.isFinite(nearestAoiDistance)
+    ? clamp(1 - nearestAoiDistance / Math.max(nearestAoiRadius * 2.8, 1), 0, 1)
+    : 0;
+  return {
+    elapsedMs: sim.swarmTelemetryElapsedMs,
+    aoiProximityRisk,
+    batteryRemainingPct: sim.swarmTelemetry.currentRun?.resources?.batteryRemainingPct ?? 1,
+    avgFrameMs: sim.performance.frameAvgMs,
+    avgScanPassMs: sim.performance.scanPassMs,
+    footprintRedundancy: sim.footprintMetrics.redundancyRatio,
+    footprintResolutionScore: sim.footprintMetrics.resolutionScore,
+    footprintUniqueAreaRate: sim.footprintMetrics.uniqueAreaRate
+  };
+}
+
+function nearestSwarmAoiDistance(activeAois, agents = sim.swarmController?.agents ?? []) {
+  if (!activeAois.length || !agents.length) {
+    return Infinity;
+  }
+  return Math.min(...activeAois.flatMap((aoi) => agents.map((agent) => agent.position.distanceTo(aoi.position))));
+}
+
+function startSwarmTelemetryRun() {
+  const activeAois = selectedAoiTargets();
+  const launchZ = -sim.room.depth * 0.42;
+  const launchOrigin = new THREE.Vector3(0, terrainClearanceY(0, launchZ, 0.28), launchZ);
+  sim.swarmTelemetry.startRun({
+    scenario: {
+      seed: sim.environmentSeed,
+      terrain: { ...sim.terrainConfig },
+      aoiPreset: els.aoiPreset.value,
+      aoiTargets: activeAois.map((aoi) => ({
+        id: aoi.id,
+        type: aoi.type,
+        label: aoi.label,
+        radius: aoi.radius,
+        distanceFromLaunch: aoi.position.distanceTo(launchOrigin)
+      })),
+      aoiNearestDistance: activeAois.length
+        ? Math.min(...activeAois.map((aoi) => aoi.position.distanceTo(launchOrigin)))
+        : null,
+      swarm: readSwarmConfig(),
+      scan: {
+        density: els.swarmScanDensity.value,
+        horizontalRays: clampInt(readNumber(els.horizontalRays), 4, 48),
+        verticalRays: clampInt(readNumber(els.verticalRays), 2, 16),
+        horizontalFov: clamp(readNumber(els.horizontalFov), 90, 360),
+        verticalFov: clamp(readNumber(els.verticalFov), 30, 120),
+        range: Math.max(38, clamp(readNumber(els.maxRange), 2, 80)),
+        voxelSize: clamp(readNumber(els.voxelSize), 0.015, 0.2)
+      },
+      performanceBudget: els.performanceBudget.value
+    },
+    behaviorProfile: {
+      version: sim.swarmController?.behaviorProfile?.version,
+      objective: sim.swarmController?.behaviorProfile?.objectives?.default
+    }
+  });
+}
+
+function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
+  if (!sim.swarmTelemetry.active || !sim.swarmController) {
+    return;
+  }
+  const agents = sim.swarmController.agents;
+  const aoiStats = swarmAoiProximityStats(activeAois);
+  const totalPathLength = agents.reduce((sum, agent) => sum + agent.metrics.distanceTraveled, 0);
+  const energyProxy = agents.reduce((sum, agent) => sum + agent.metrics.distanceTraveled * roleEnergyScale(agent.role), 0);
+  const resources = estimateSwarmResourceUse({
+    agents,
+    elapsedMs: sim.swarmTelemetryElapsedMs,
+    scanTotals: sim.swarmTelemetry.currentRun?.totals,
+    network: {
+      avgLinks: sim.swarmTelemetry.currentRun?.network?.avgLinks,
+      linkCount: sim.swarmSnapshot?.communication?.edges?.length ?? 0
+    },
+    performance: sim.swarmTelemetry.currentRun?.performance,
+    model: sim.droneResourceModel
+  });
+  sim.swarmTelemetry.recordSample({
+    elapsedMs: sim.swarmTelemetryElapsedMs,
+    scanCounter: sim.scanCounter,
+    pointVoxels: sim.pointCount,
+    coverage: sim.mapper ? sim.mapper.knownCount / Math.max(sim.mapper.states.length, 1) : 0,
+    formationMode: sim.swarmSnapshot?.metrics?.formationMode ?? els.swarmFormation.value,
+    behaviorWeights: sim.swarmSnapshot?.metrics?.behaviorWeights ?? null,
+    normalizedSignals: sim.swarmSnapshot?.metrics?.normalizedSignals ?? null,
+    derivedControls: sim.swarmSnapshot?.metrics?.derivedControls ?? null,
+    behaviorProfileVersion: sim.swarmSnapshot?.metrics?.behaviorProfileVersion ?? null,
+    communicationHealth: sim.swarmSnapshot?.metrics?.communicationHealth ?? 1,
+    connectedComponents: sim.swarmSnapshot?.metrics?.connectedComponents ?? 0,
+    linkCount: sim.swarmSnapshot?.communication?.edges?.length ?? 0,
+    adaptiveNeighborTarget: sim.swarmSnapshot?.metrics?.adaptiveNeighborTarget ?? clampInt(readNumber(els.communicationNeighbors), 1, 8),
+    roleCounts: swarmRoleCounts(),
+    aoiInFocus: aoiStats.inFocus,
+    aoiFocusedAgents: aoiStats.focusedAgents,
+    nearestAoiDistance: aoiStats.nearestDistance,
+    totalPathLength,
+    energyProxy,
+    resources,
+    frameAvgMs: sim.performance.frameAvgMs,
+    scanPassMs: sim.performance.scanPassMs
+  });
+}
+
+function finalizeSwarmTelemetry(reason) {
+  if (!sim.swarmTelemetry?.active) {
+    return;
+  }
+  const validity = evaluateSwarmRunValidity(reason);
+  const scoring = scoreSwarmRun({
+    ...sim.swarmTelemetry.currentRun,
+    validity
+  }, swarmBehaviorProfile());
+  const activeAois = selectedAoiTargets();
+  const notes = [
+    `Ended because ${reason}.`,
+    activeAois.length ? `AOI preset ${els.aoiPreset.value} with ${activeAois.length} active target(s).` : 'No active AOI target.'
+  ];
+  sim.swarmTelemetry.finishRun({
+    status: reason,
+    endedAtMs: performance.now(),
+    validity,
+    scoring,
+    notes
+  }).then((run) => {
+    if (run) {
+      logMessage(`Telemetry saved: ${run.status} run, ${run.totals.rawHits.toLocaleString()} raw hits, score ${formatScore(run.scoring?.total)}, ${run.validity.flags.length} validity flag(s).`);
+    }
+  });
+}
+
+function evaluateSwarmRunValidity(reason) {
+  const run = sim.swarmTelemetry.currentRun;
+  const flags = [];
+  const elapsedMs = run?.elapsedMs ?? sim.swarmTelemetryElapsedMs;
+  const validity = DEFAULT_SWARM_EVALUATION_PROFILE.validity;
+  const minAoiDwellMs = run?.aoi.selectedCount ? validity.minAoiDwellMs : 0;
+  const minAoiHits = run?.aoi.selectedCount ? validity.minAoiHits : 0;
+
+  if (reason !== 'complete' && elapsedMs < validity.minRunMs) {
+    flags.push('insufficient_scan_time');
+  }
+  if (run?.aoi.selectedCount && run.aoi.firstContactMs === null) {
+    flags.push('target_not_reached');
+  }
+  if (run?.aoi.selectedCount && run.aoi.dwellMs < minAoiDwellMs) {
+    flags.push('insufficient_aoi_dwell');
+  }
+  if (run?.aoi.selectedCount && run.aoi.rawHits < minAoiHits) {
+    flags.push('low_raw_aoi_coverage');
+  }
+  if (sim.performance.frameAvgMs > validity.maxStableFrameMs) {
+    flags.push('performance_unstable');
+  }
+
+  return {
+    complete: flags.length === 0 && reason !== 'reset',
+    flags
+  };
+}
+
+function swarmRoleCounts() {
+  const counts = {};
+  (sim.swarmController?.agents ?? []).forEach((agent) => {
+    counts[agent.role] = (counts[agent.role] ?? 0) + 1;
+  });
+  return counts;
+}
+
+function swarmAoiProximityStats(activeAois) {
+  const agents = sim.swarmController?.agents ?? [];
+  if (!agents.length || !activeAois.length) {
+    return { inFocus: false, focusedAgents: 0, nearestDistance: null };
+  }
+  const focusDistance = Math.max(18, Math.min(60, clamp(readNumber(els.maxRange), 2, 80) * 0.75));
+  let nearestDistance = Infinity;
+  let focusedAgents = 0;
+  agents.forEach((agent) => {
+    const distance = Math.min(...activeAois.map((aoi) => agent.position.distanceTo(aoi.position)));
+    nearestDistance = Math.min(nearestDistance, distance);
+    if (distance <= focusDistance) {
+      focusedAgents += 1;
+    }
+  });
+  return {
+    inFocus: focusedAgents >= Math.min(3, agents.length),
+    focusedAgents,
+    nearestDistance
+  };
+}
+
+function roleEnergyScale(role) {
+  switch (role) {
+    case DRONE_ROLES.RELAY:
+      return 0.92;
+    case DRONE_ROLES.SCOUT:
+      return 1.08;
+    case DRONE_ROLES.VERIFIER:
+      return 1.04;
+    default:
+      return 1;
+  }
 }
 
 function computeSwarmMissionCenter(activeAois) {
@@ -2572,13 +2938,81 @@ function computeSwarmMissionCenter(activeAois) {
 function terrainAwareTarget(position, agent = null) {
   const target = position.clone();
   target.y = Math.max(target.y, terrainClearanceY(target.x, target.z, terrainCruiseClearance()));
-  if (agent?.assignment?.goal?.position) {
-    const goal = agent.assignment.goal.position;
-    target.x = lerp(target.x, goal.x, 0.22);
-    target.z = lerp(target.z, goal.z, 0.22);
+  const assignmentGoal = agent?.assignment?.goal ?? agent?.assignment;
+  if (assignmentGoal?.position) {
+    const goal = assignmentGoal.position;
+    const blend = roleGoalBlend(agent.role, assignmentGoal.type);
+    target.x = lerp(target.x, goal.x, blend);
+    target.z = lerp(target.z, goal.z, blend);
+    target.y = lerp(target.y, goal.y ?? target.y, blend * 0.45);
     target.y = Math.max(target.y, terrainClearanceY(target.x, target.z, terrainCruiseClearance()));
   }
   return clampSwarmPosition(target);
+}
+
+function roleGoalBlend(role, taskType) {
+  const movement = swarmBehaviorProfile().movement;
+  const controls = swarmDerivedControls();
+  let key = 'default';
+  let base = movement.assignmentBlend.default;
+  if (role === DRONE_ROLES.RELAY || taskType === 'relay') {
+    key = 'relay';
+    base = movement.assignmentBlend.relay;
+  } else if (role === DRONE_ROLES.VERIFIER || taskType === 'verify') {
+    key = 'verify';
+    base = movement.assignmentBlend.verify;
+  } else if (role === DRONE_ROLES.MAPPER || taskType === 'aoi') {
+    key = taskType === 'aoi' ? 'aoi' : 'mapper';
+    base = movement.assignmentBlend[key];
+  }
+  return clamp(base * (controls.assignmentBlendScale?.[key] ?? 1), 0.04, 0.72);
+}
+
+function smoothSwarmAgentStep(agent, target, maxStep, deltaSeconds) {
+  const movement = swarmBehaviorProfile().movement;
+  const controls = swarmDerivedControls();
+  if (deltaSeconds <= 0 || maxStep <= 0) {
+    return agent.position.clone();
+  }
+
+  if (!agent.smoothedTarget) {
+    agent.smoothedTarget = target.clone();
+  }
+  const targetBlend = 1 - Math.exp(-deltaSeconds * movement.targetSmoothingPerSecond);
+  agent.smoothedTarget.lerp(target, targetBlend);
+
+  const desired = agent.smoothedTarget.clone().sub(agent.position);
+  const distance = desired.length();
+  if (distance < 0.02) {
+    agent.steeringVelocity.multiplyScalar(Math.exp(-deltaSeconds * movement.stopDampingPerSecond));
+    return clampSwarmPosition(agent.position.clone().addScaledVector(agent.steeringVelocity, deltaSeconds));
+  }
+
+  const cruiseSpeed = maxStep / Math.max(deltaSeconds, 1e-6);
+  const roleSpeed = roleSpeedScale(agent.role);
+  desired.normalize().multiplyScalar(
+    cruiseSpeed * roleSpeed * (controls.movementFreedom ?? 1) * clamp(distance / movement.slowdownDistance, movement.minApproachScale, 1)
+  );
+
+  const steeringBlend = 1 - Math.exp(-deltaSeconds * movement.steeringSmoothingPerSecond);
+  agent.steeringVelocity.lerp(desired, steeringBlend);
+  const step = agent.steeringVelocity.clone().multiplyScalar(deltaSeconds);
+  if (step.length() > maxStep * roleSpeed) {
+    step.setLength(maxStep * roleSpeed);
+  }
+  return clampSwarmPosition(agent.position.clone().add(step));
+}
+
+function roleSpeedScale(role) {
+  return (swarmBehaviorProfile().movement.roleSpeedScale[role] ?? 1) * (swarmDerivedControls().roleSpeedScale?.[role] ?? 1);
+}
+
+function swarmBehaviorProfile() {
+  return sim.swarmController?.behaviorProfile ?? activeBehaviorProfile();
+}
+
+function swarmDerivedControls() {
+  return sim.swarmSnapshot?.metrics?.derivedControls ?? sim.swarmController?.metrics?.derivedControls ?? {};
 }
 
 function terrainClearanceY(x, z, extraClearance = 0) {
@@ -2630,6 +3064,44 @@ function sampleSwarmFrontierTasks(limit) {
   return tasks;
 }
 
+function sampleSwarmRelayTasks(missionCenter) {
+  const relay = swarmBehaviorProfile().relay;
+  const agents = sim.swarmController?.agents ?? [];
+  if (agents.length < 3) {
+    return [];
+  }
+
+  const range = clamp(readNumber(els.communicationRange), 2, 80);
+  const baseZ = sim.room.depth * relay.baseZFactor;
+  const base = new THREE.Vector3(0, terrainClearanceY(0, baseZ, terrainCruiseClearance()), baseZ);
+  const center = missionCenter ?? computeSwarmMissionCenter(selectedAoiTargets());
+  const distance = base.distanceTo(center);
+  const relayCount = clampInt(
+    Math.ceil(distance / Math.max(range * relay.spacingRangeFactor, relay.minimumSpacing)) - 1,
+    1,
+    Math.min(relay.maxTasks, agents.length - 2)
+  );
+  const tasks = [];
+
+  for (let index = 0; index < relayCount; index += 1) {
+    const t = (index + 1) / (relayCount + 1);
+    const x = lerp(base.x, center.x, t);
+    const z = lerp(base.z, center.z, t);
+    const y = Math.max(
+      lerp(base.y, center.y, t) + Math.sin(t * Math.PI) * relay.altitudeArc,
+      terrainClearanceY(x, z, terrainCruiseClearance() * relay.clearanceScale)
+    );
+    tasks.push({
+      id: `relay-${index}`,
+      position: new THREE.Vector3(x, y, z),
+      priority: relay.priorityBase + t * relay.priorityDistanceGain,
+      informationGain: relay.informationGain
+    });
+  }
+
+  return tasks;
+}
+
 function estimateSwarmOpenness() {
   const agents = sim.swarmController?.agents ?? [];
   if (!agents.length) {
@@ -2653,6 +3125,12 @@ function performSwarmSensorPass() {
   const sensorRange = Math.max(38, clamp(readNumber(els.maxRange), 2, 80));
   let rayCount = 0;
   let hitCount = 0;
+  let aoiHitCount = 0;
+  let focusedHitCount = 0;
+  let footprintAreaM2 = 0;
+  let uniqueFootprintAreaM2 = 0;
+  let redundantFootprintAreaM2 = 0;
+  let resolutionScoreSum = 0;
 
   agents.forEach((agent, agentIndex) => {
     let hits = 0;
@@ -2667,7 +3145,16 @@ function performSwarmSensorPass() {
       hits += 1;
       hitCount += 1;
       const metadata = pointAoiMetadata(hit.point, activeAois, false);
-      addPointToCloud(hit.point, hit.distance, metadata);
+      if (metadata.aoiId) {
+        aoiHitCount += 1;
+      }
+      const footprint = estimateRayFootprint(hit.distance, false);
+      const footprintCoverage = recordFootprintCoverage(hit.point, footprint);
+      footprintAreaM2 += footprint.areaM2;
+      uniqueFootprintAreaM2 += footprintCoverage.newAreaM2;
+      redundantFootprintAreaM2 += footprintCoverage.redundantAreaM2;
+      resolutionScoreSum += footprint.resolutionScore;
+      addPointToCloud(hit.point, hit.distance, metadata, hit);
       agent.recordPointObservation({
         position: hit.point.clone(),
         count: 1,
@@ -2685,7 +3172,7 @@ function performSwarmSensorPass() {
 
     const focus = nearestAoiFocus(agent, activeAois, sensorRange, agentIndex);
     if (focus) {
-      const focusDirections = buildAoiFocusDirections(agent.position, focus.focusPoint, focus.strength);
+      const focusDirections = buildAoiFocusDirections(agent.position, focus.focusPoint, focus.strength * roleAoiFocusScale(agent.role));
       focusDirections.forEach((direction, directionIndex) => {
         temp.source.copy(agent.position);
         temp.dir.copy(direction).normalize();
@@ -2697,7 +3184,17 @@ function performSwarmSensorPass() {
         hits += 1;
         hitCount += 1;
         const metadata = pointAoiMetadata(hit.point, [focus], true);
-        addPointToCloud(hit.point, hit.distance, metadata);
+        if (metadata.aoiId) {
+          aoiHitCount += 1;
+        }
+        focusedHitCount += 1;
+        const footprint = estimateRayFootprint(hit.distance, true);
+        const footprintCoverage = recordFootprintCoverage(hit.point, footprint);
+        footprintAreaM2 += footprint.areaM2;
+        uniqueFootprintAreaM2 += footprintCoverage.newAreaM2;
+        redundantFootprintAreaM2 += footprintCoverage.redundantAreaM2;
+        resolutionScoreSum += footprint.resolutionScore;
+        addPointToCloud(hit.point, hit.distance, metadata, hit);
         agent.recordPointObservation({
           position: hit.point.clone(),
           count: 1,
@@ -2726,8 +3223,29 @@ function performSwarmSensorPass() {
   sim.performance.scanPassMs = performance.now() - passStart;
   sim.performance.lastScanRayCount = rayCount;
   sim.performance.lastScanHits = hitCount;
+  sim.footprintMetrics = {
+    redundancyRatio: footprintAreaM2 > 0 ? redundantFootprintAreaM2 / Math.max(footprintAreaM2, 1e-6) : 0,
+    resolutionScore: hitCount ? resolutionScoreSum / hitCount : sim.footprintMetrics.resolutionScore,
+    uniqueAreaRate: uniqueFootprintAreaM2 / Math.max(sim.performance.scanPassMs / 1000, 1e-3)
+  };
+  sim.swarmTelemetry.recordScan({
+    rayCount,
+    hitCount,
+    focusedHitCount,
+    aoiHitCount,
+    scanPassMs: sim.performance.scanPassMs,
+    pointVoxels: sim.pointCount,
+    footprintAreaM2,
+    uniqueFootprintAreaM2,
+    redundantFootprintAreaM2,
+    avgFootprintResolutionScore: hitCount ? resolutionScoreSum / hitCount : 0
+  });
   sim.scanCounter += 1;
   renderScanBeams(beams, 'swarm');
+}
+
+function roleAoiFocusScale(role) {
+  return (swarmBehaviorProfile().sensing.roleAoiFocusScale[role] ?? 1) * (swarmDerivedControls().sensingFocusScale?.[role] ?? 1);
 }
 
 function nearestAoiFocus(agent, activeAois, sensorRange, agentIndex) {
@@ -2736,13 +3254,17 @@ function nearestAoiFocus(agent, activeAois, sensorRange, agentIndex) {
   }
 
   let best = null;
+  const sensing = swarmBehaviorProfile().sensing;
   activeAois.forEach((aoi) => {
     const distance = agent.position.distanceTo(aoi.position);
-    const focusRange = Math.min(sensorRange * 0.9, Math.max(18, (aoi.radius ?? 14) * 1.65));
+    const focusRange = Math.min(
+      sensorRange * sensing.focusRangeSensorFactor,
+      Math.max(sensing.focusRangeMin, (aoi.radius ?? 14) * sensing.focusRangeRadiusFactor)
+    );
     if (distance > focusRange) {
       return;
     }
-    const strength = clamp(1 - distance / focusRange, 0.08, 1);
+    const strength = clamp(1 - distance / focusRange, sensing.focusStrengthMin, 1);
     if (!best || strength > best.strength) {
       best = {
         ...aoi,
@@ -2844,7 +3366,7 @@ function swarmScanDensityConfig() {
     case 'economy':
       return { horizontal: 6, vertical: 2, writeInputs: true };
     case 'light':
-      return { horizontal: 9, vertical: 3, writeInputs: true };
+      return { horizontal: 4, vertical: 4, writeInputs: true };
     case 'dense':
       return { horizontal: 18, vertical: 5, writeInputs: true };
     case 'survey':
@@ -2875,20 +3397,28 @@ function castSceneRay(source, direction, maxRange) {
   raycaster.far = maxRange;
   raycaster.set(source, direction);
   const intersections = raycaster.intersectObjects(sim.scanTargets, true);
-  return intersections[0] ?? null;
+  const hit = intersections[0] ?? null;
+  if (hit) {
+    hit.rayOrigin = source.clone();
+  }
+  return hit;
 }
 
 function enforceSwarmNetworkEnvelope() {
+  const network = swarmBehaviorProfile().network;
   const agents = sim.swarmController?.agents ?? [];
   if (agents.length < 2) {
     return;
   }
 
   const range = clamp(readNumber(els.communicationRange), 2, 80);
-  const requiredNeighbors = Math.min(clampInt(readNumber(els.communicationNeighbors), 1, 8), agents.length - 1);
-  const softMax = range * 0.9;
+  const requiredNeighbors = Math.min(
+    sim.swarmController?.communicationGraph?.maxNeighbors ?? clampInt(readNumber(els.communicationNeighbors), network.minNeighbors, network.maxNeighbors),
+    agents.length - 1
+  );
+  const softMax = range * network.softRangeFactor;
 
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < network.correctionPasses; pass += 1) {
     agents.forEach((agent) => {
       const nearest = agents
         .filter((candidate) => candidate.id !== agent.id)
@@ -2903,13 +3433,22 @@ function enforceSwarmNetworkEnvelope() {
         if (neighbor.distance <= softMax || neighbor.distance < 1e-6) {
           return;
         }
-        const correction = (neighbor.distance - softMax) * 0.5;
+        const correction = (neighbor.distance - softMax) * network.correctionStrength * roleNetworkCompliance(agent.role);
         temp.travel.copy(neighbor.agent.position).sub(agent.position).normalize();
         agent.setPosition(clampSwarmPosition(agent.position.clone().addScaledVector(temp.travel, correction)));
-        neighbor.agent.setPosition(clampSwarmPosition(neighbor.agent.position.clone().addScaledVector(temp.travel, -correction * 0.35)));
+        neighbor.agent.setPosition(clampSwarmPosition(neighbor.agent.position.clone().addScaledVector(
+          temp.travel,
+          -correction * network.neighborCounterPush * roleNetworkCompliance(neighbor.agent.role)
+        )));
       });
     });
   }
+}
+
+function roleNetworkCompliance(role) {
+  const network = swarmBehaviorProfile().network;
+  const base = role === DRONE_ROLES.RELAY ? network.relayCompliance : role === DRONE_ROLES.SCOUT ? network.scoutCompliance : 1;
+  return base * (swarmDerivedControls().networkComplianceScale?.[role] ?? 1);
 }
 
 function resolveSwarmCollisions() {
@@ -3066,9 +3605,33 @@ function readSwarmConfig() {
     maxNeighbors: clampInt(readNumber(els.communicationNeighbors), 1, 8),
     communicationDropout: clamp(readNumber(els.communicationDropout), 0, 0.45),
     formationMode: els.swarmFormation.value,
+    behaviorProfile: activeBehaviorProfile(),
     spacing: 5.6,
     verticalSpan: Math.max(0.8, sim.room.height * 0.28)
   };
+}
+
+function activeBehaviorProfile() {
+  const objectiveKey = els.objectiveProfile?.value ?? DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives.default;
+  return {
+    ...DEFAULT_SWARM_BEHAVIOR_PROFILE,
+    objectives: {
+      ...DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives,
+      default: objectiveKey
+    }
+  };
+}
+
+function applyObjectiveProfileChange() {
+  const profile = activeBehaviorProfile();
+  if (sim.swarmController) {
+    sim.swarmController.behaviorProfile = profile;
+    sim.swarmController.formationGraph.behaviorProfile = profile;
+    sim.swarmController.taskAllocator.behaviorProfile = profile;
+    sim.swarmController.metrics.behaviorProfileVersion = profile.version;
+  }
+  noteTelemetryControlChange('objective-profile');
+  logMessage(`Objective profile set to ${profile.objectives.profiles[profile.objectives.default]?.label ?? profile.objectives.default}.`);
 }
 
 function isSwarmMode() {
@@ -3124,7 +3687,54 @@ function pointAoiMetadata(point, activeAois, focused) {
   };
 }
 
-function addPointToCloud(point, distance, metadata = {}) {
+function estimateRayFootprint(distance, focused = false) {
+  const horizontalCount = clampInt(readNumber(els.horizontalRays), 4, 48);
+  const verticalCount = clampInt(readNumber(els.verticalRays), 2, 16);
+  const horizontalStep = THREE.MathUtils.degToRad(clamp(readNumber(els.horizontalFov), 90, 360)) / Math.max(horizontalCount - 1, 1);
+  const verticalStep = THREE.MathUtils.degToRad(clamp(readNumber(els.verticalFov), 30, 120)) / Math.max(verticalCount - 1, 1);
+  const angularStep = Math.max(horizontalStep, verticalStep);
+  const focusScale = focused ? 0.62 : 1;
+  const radius = clamp(Math.tan(angularStep * 0.5) * distance * focusScale, 0.08, 2.6);
+  const targetDetailRadius = 0.38;
+  return {
+    radius,
+    areaM2: Math.PI * radius * radius,
+    resolutionScore: clamp(targetDetailRadius / Math.max(radius, targetDetailRadius), 0, 1)
+  };
+}
+
+function recordFootprintCoverage(point, footprint) {
+  const bucket = Math.max(0, Math.min(5, Math.ceil(Math.log2(Math.max(footprint.radius / 0.16, 1)))));
+  const cellSize = Math.max(0.45, footprint.radius * 1.35);
+  const key = [
+    bucket,
+    Math.round(point.x / cellSize),
+    Math.round(point.y / cellSize),
+    Math.round(point.z / cellSize)
+  ].join(':');
+  const entry = sim.footprintCoverageMap.get(key);
+  if (!entry) {
+    sim.footprintCoverageMap.set(key, {
+      count: 1,
+      areaM2: footprint.areaM2,
+      radius: footprint.radius
+    });
+    return {
+      newAreaM2: footprint.areaM2,
+      redundantAreaM2: 0
+    };
+  }
+
+  entry.count += 1;
+  entry.areaM2 = Math.max(entry.areaM2, footprint.areaM2);
+  const novelty = 1 / Math.max(entry.count, 1);
+  return {
+    newAreaM2: footprint.areaM2 * novelty,
+    redundantAreaM2: footprint.areaM2 * (1 - novelty)
+  };
+}
+
+function addPointToCloud(point, distance, metadata = {}, hit = null) {
   const voxel = clamp(readNumber(els.voxelSize), 0.015, 0.2);
   const key = [
     Math.round(point.x / voxel),
@@ -3158,10 +3768,22 @@ function updatePointReadouts() {
   const total = sim.pointCount;
   const displayed = sim.performance.displayedPointCount || total;
   els.pointsReadout.textContent = total.toLocaleString();
-  els.cloudMeta.textContent =
-    displayed < total
-      ? `${displayed.toLocaleString()} / ${total.toLocaleString()} pts visible`
-      : `${total.toLocaleString()} pts`;
+  const shown = displayed < total ? displayed : total;
+  els.cloudMeta.textContent = `${compactPointCount(shown)} / ${compactPointCount(total)} pts`;
+  els.cloudMeta.title = displayed < total
+    ? `${displayed.toLocaleString()} / ${total.toLocaleString()} points visible`
+    : `${total.toLocaleString()} / ${total.toLocaleString()} points visible`;
+}
+
+function compactPointCount(value) {
+  const numeric = Math.max(0, Number(value) || 0);
+  if (numeric >= 1000000) {
+    return `${(numeric / 1000000).toFixed(numeric >= 10000000 ? 0 : 1)}M`;
+  }
+  if (numeric >= 10000) {
+    return `${(numeric / 1000).toFixed(numeric >= 100000 ? 0 : 1)}k`;
+  }
+  return numeric.toLocaleString();
 }
 
 function ensurePointCloudBufferCapacity(pointCount) {
@@ -3179,13 +3801,14 @@ function ensurePointCloudBufferCapacity(pointCount) {
 }
 
 function flushPointCloudGeometry(maxRange) {
-  if (!sim.cloudDirty && sim.pointCount > 0) {
+  const totalPointCount = sim.voxelMap.size;
+  if (!sim.cloudDirty && totalPointCount > 0) {
     return;
   }
   const flushStart = performance.now();
   const pointBudget = clampInt(readNumber(els.visiblePointBudget), 10000, 1200000);
-  const sampleStep = Math.max(1, Math.ceil(sim.voxelMap.size / Math.max(pointBudget, 1)));
-  const targetVisibleCount = Math.ceil(sim.voxelMap.size / sampleStep);
+  const sampleStep = Math.max(1, Math.ceil(totalPointCount / Math.max(pointBudget, 1)));
+  const targetVisibleCount = Math.ceil(totalPointCount / sampleStep);
   ensurePointCloudBufferCapacity(targetVisibleCount);
   const positions = sim.pointCloudBuffer.positions;
   const colors = sim.pointCloudBuffer.colors;
@@ -3420,7 +4043,9 @@ function refreshStatus() {
   els.plannerReadout.textContent = readablePlanner(els.plannerMode.value);
   els.swarmReadout.textContent = isSwarmMode() ? `${clampInt(readNumber(els.swarmSize), 3, 24)} drones` : 'Off';
   els.formationReadout.textContent = readableFormation(sim.swarmSnapshot?.metrics?.formationMode ?? els.swarmFormation.value);
-  els.commsReadout.textContent = sim.swarmSnapshot ? `${sim.swarmSnapshot.communication.edges.length} links` : '0 links';
+  els.commsReadout.textContent = sim.swarmSnapshot
+    ? `${sim.swarmSnapshot.communication.edges.length} links / k${sim.swarmSnapshot.metrics?.adaptiveNeighborTarget ?? readNumber(els.communicationNeighbors)}`
+    : '0 links';
   const budget = readPerformanceBudgetConfig();
   const fps = Math.round(1000 / Math.max(sim.performance.frameAvgMs, 1));
   els.budgetReadout.textContent = `${budget.label} ${fps} fps`;
@@ -3433,6 +4058,7 @@ function refreshStatus() {
   const coverage = sim.mapper ? Math.round((sim.mapper.knownCount / Math.max(total, 1)) * 100) : 0;
   els.coverageReadout.textContent = `${coverage}%`;
   els.goalReadout.textContent = sim.currentGoal ? `${sim.plannerStats.goalsReached} + active` : `${sim.plannerStats.goalsReached} done`;
+  renderAlgorithmPanel();
 }
 
 function logMessage(message) {
@@ -3458,6 +4084,220 @@ function logScanEvent(hits, scanContext) {
   logMessage(
     `Scan ${sim.scanCounter}: ${hits} returns during ${scanContext}. Coverage ${coverage}% with ${sim.mapper.frontierIndices.length} frontiers in 3D space.`
   );
+}
+
+function toggleAlgorithmPanel() {
+  els.algorithmPanel.hidden = !els.algorithmPanel.hidden;
+  if (!els.algorithmPanel.hidden) {
+    renderAlgorithmPanel();
+  }
+}
+
+function renderAlgorithmPanel() {
+  if (!els.algorithmPanel || els.algorithmPanel.hidden) {
+    return;
+  }
+
+  const snapshot = sim.swarmSnapshot ?? sim.swarmController?.snapshot();
+  const metrics = snapshot?.metrics ?? {};
+  const profile = swarmBehaviorProfile();
+  const objectiveKey = profile.objectives.default;
+  const objective = profile.objectives.profiles[objectiveKey];
+  renderMetricList(els.algorithmWeights, metrics.behaviorWeights ?? {}, { percent: true, sort: true });
+  renderMetricList(els.algorithmSignals, metrics.normalizedSignals ?? {}, { percent: true, maxRows: 9 });
+  renderMetricList(els.algorithmControls, flattenAlgorithmControls(metrics.derivedControls ?? {}), { maxRows: 12 });
+  renderMetricList(els.algorithmRoles, swarmRoleCounts(), { barMax: Math.max(sim.swarmController?.agents?.length ?? 1, 1) });
+  renderMetricList(els.algorithmObjective, {
+    objective: objective?.label ?? objectiveKey,
+    profile: profile.version,
+    formation: metrics.formationMode ?? els.swarmFormation.value,
+    adaptiveK: metrics.adaptiveNeighborTarget ?? readNumber(els.communicationNeighbors)
+  });
+}
+
+function flattenAlgorithmControls(controls) {
+  const flattened = {};
+  Object.entries(controls ?? {}).forEach(([key, value]) => {
+    if (key === 'primitivePressure') {
+      return;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      Object.entries(value).forEach(([childKey, childValue]) => {
+        flattened[`${key}.${childKey}`] = childValue;
+      });
+      return;
+    }
+    flattened[key] = value;
+  });
+  return flattened;
+}
+
+function renderMetricList(container, values, { percent = false, sort = false, maxRows = 20, barMax = 1 } = {}) {
+  if (!container) {
+    return;
+  }
+
+  const entries = Object.entries(values ?? {})
+    .filter(([, value]) => value !== null && value !== undefined)
+    .sort((a, b) => sort ? Number(b[1]) - Number(a[1]) : 0)
+    .slice(0, maxRows);
+
+  if (!entries.length) {
+    container.innerHTML = '<div class="metric-row"><span>No controller data yet</span><strong>--</strong></div>';
+    return;
+  }
+
+  container.innerHTML = entries.map(([key, value]) => {
+    const numeric = typeof value === 'number' && Number.isFinite(value);
+    const normalized = numeric ? (percent ? clamp(value, 0, 1) : clamp(value / Math.max(barMax, 1), 0, 1)) : 0;
+    return `
+      <div class="metric-row">
+        <span>${escapeHtml(readableMetricName(key))}</span>
+        <strong>${escapeHtml(formatMetricValue(value, percent))}</strong>
+        ${numeric ? `<div class="metric-bar"><span style="width:${(normalized * 100).toFixed(1)}%"></span></div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function readableMetricName(key) {
+  return String(key)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[._-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatMetricValue(value, percent = false) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return String(value ?? '--');
+  }
+  if (percent) {
+    return `${Math.round(clamp(value, 0, 1) * 100)}%`;
+  }
+  if (Math.abs(value) >= 100) {
+    return value.toFixed(0);
+  }
+  if (Math.abs(value) >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(2);
+}
+
+function formatScore(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '--';
+}
+
+function toggleTelemetryPanel() {
+  els.telemetryPanel.hidden = !els.telemetryPanel.hidden;
+  if (!els.telemetryPanel.hidden) {
+    refreshTelemetryPanel();
+  }
+}
+
+async function refreshTelemetryPanel() {
+  const allRuns = await sim.swarmTelemetry.listRuns({ limit: 50 });
+  const validCount = allRuns.filter((run) => run.validity?.complete).length;
+  const scenarioFilteredRuns = filterTelemetryRunsByScenario(allRuns, els.telemetryScenarioFilter.value);
+  const runs = sortTelemetryRuns(
+    els.telemetryValidOnly.checked ? scenarioFilteredRuns.filter((run) => run.validity?.complete) : scenarioFilteredRuns,
+    els.telemetrySort.value
+  ).slice(0, 12);
+  const latest = allRuns[0] ?? null;
+  els.telemetryRunCount.textContent = allRuns.length.toLocaleString();
+  els.telemetryValidCount.textContent = validCount.toLocaleString();
+  els.telemetryLatestHits.textContent = latest ? (latest.totals?.rawHits ?? 0).toLocaleString() : '0';
+
+  if (!runs.length) {
+    els.telemetryRuns.innerHTML = allRuns.length
+      ? '<div class="telemetry-run"><strong>No matching runs</strong><span>Try disabling Valid only or changing the sort mode.</span></div>'
+      : '<div class="telemetry-run"><strong>No saved runs yet</strong><span>Pause, reset, or complete a swarm mission to persist telemetry.</span></div>';
+    return;
+  }
+
+  els.telemetryRuns.innerHTML = runs.map((run) => {
+    const flags = run.validity?.flags?.length ? run.validity.flags.join(', ') : 'valid';
+    const aoi = run.scenario?.aoiPreset ?? 'auto';
+    const elapsedSeconds = ((run.elapsedMs ?? 0) / 1000).toFixed(1);
+    const behavior = run.behaviorProfile?.version ?? 'unknown profile';
+    const scoring = scoreRunForActiveObjective(run);
+    const components = scoring.components ?? {};
+    const temporal = scoring.temporalMeasures ?? {};
+    return `
+      <div class="telemetry-run">
+        <strong>${escapeHtml(run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / confidence ${formatScore(scoring.confidence)}</strong>
+        <span>${(run.totals?.rawHits ?? 0).toLocaleString()} raw hits, ${(run.totals?.pointVoxels ?? 0).toLocaleString()} point voxels, ${(run.totals?.focusedHits ?? 0).toLocaleString()} focused, k${run.samples?.at?.(-1)?.adaptiveNeighborTarget ?? run.network?.avgAdaptiveNeighborTarget?.toFixed?.(1) ?? '--'}</span>
+        <span>AOI ${formatScore(components.aoiQuality)}, coverage ${formatScore(components.coverage)}, network ${formatScore(components.networkResilience)}, compute ${formatScore(components.computeEfficiency)}, energy ${formatScore(components.energyProxy)}, smooth ${formatScore(components.adaptationSmoothness)}, safety ${formatScore(components.constraintSafety)}</span>
+        <span>${formatMetricValue(temporal.avgNewPointVoxelsPerSecond ?? 0)} new vox/s, ${formatMetricValue(temporal.avgUniqueFootprintAreaPerSecond ?? 0)} m2/s footprint, ${formatScore(1 - (temporal.avgFootprintRedundancyRatio ?? 0))} non-overlap</span>
+        <span>${formatMetricValue(temporal.usefulAoiHitRateAfterContact ?? 0)} AOI hits/s after contact, ${formatMetricValue(temporal.avgBehaviorWeightChangePerSecond ?? 0)} weight-change/s, ${formatMetricValue(temporal.riskExposureSeconds ?? 0)} risk s</span>
+        <span>${escapeHtml(flags)} / ${escapeHtml(behavior)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterTelemetryRunsByScenario(runs, scenarioFilter) {
+  if (!scenarioFilter || scenarioFilter === 'all') {
+    return runs;
+  }
+  return runs.filter((run) => (run.scenario?.aoiPreset ?? 'auto') === scenarioFilter);
+}
+
+function scoreRunForActiveObjective(run) {
+  return scoreSwarmRun({
+    ...run,
+    behaviorProfile: {
+      ...(run.behaviorProfile ?? {}),
+      objective: els.objectiveProfile.value
+    }
+  }, swarmBehaviorProfile());
+}
+
+function sortTelemetryRuns(runs, sortMode) {
+  const copy = [...runs];
+  if (sortMode === 'recent') {
+    return copy;
+  }
+  return copy.sort((a, b) => {
+    const scoreA = scoreRunForActiveObjective(a);
+    const scoreB = scoreRunForActiveObjective(b);
+    const valueA = sortMode === 'score'
+      ? scoreA.total
+      : sortMode === 'confidence'
+        ? scoreA.confidence
+        : scoreA.components?.[sortMode] ?? 0;
+    const valueB = sortMode === 'score'
+      ? scoreB.total
+      : sortMode === 'confidence'
+        ? scoreB.confidence
+        : scoreB.components?.[sortMode] ?? 0;
+    return valueB - valueA;
+  });
+}
+
+async function exportTelemetryRuns() {
+  const runs = await sim.swarmTelemetry.exportRuns();
+  if (!runs.length) {
+    logMessage('No telemetry runs saved yet.');
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(runs, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `swarm-telemetry-runs-${sim.environmentSeed}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  logMessage(`Telemetry exported with ${runs.length.toLocaleString()} saved run(s).`);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function exportPointCloudAsPly() {
@@ -3496,7 +4336,7 @@ function exportPointCloudAsPly() {
   anchor.download = `terrain-swarm-point-cloud-${sim.environmentSeed}.ply`;
   anchor.click();
   URL.revokeObjectURL(url);
-  logMessage(`PLY exported with ${lines.length.toLocaleString()} points.`);
+  logMessage(`PLY exported with ${lines.length.toLocaleString()} raw points.`);
 }
 
 function makeOverlayDraggable() {
