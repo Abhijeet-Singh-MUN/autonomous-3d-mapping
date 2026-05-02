@@ -4,6 +4,16 @@ This log captures why changes are made, which issues they address, and what they
 
 ## 2026-05-02
 
+### Grey-Box Policy Coordinate Refactor
+
+- Added `greybox-policy-v1` / `greybox-policy-v1.0` as the active swarm algorithm model namespace.
+- Replaced the optimizer-facing low-level parameter registry with four Pareto policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
+- Kept low-level behavior gains, role shares, sensing multipliers, task weights, network thresholds, and footprint controls active as derived parameters instead of deleting them.
+- Added documented `k` coupling coefficients so `psi -> derivedProfile -> controller` is explicit, bounded, and inspectable.
+- Updated scoring to store a Pareto vector, scalar loss from ideal scores, scalar display score, and the older diagnostic score components.
+- Namespaced telemetry by model family so old IndexedDB runs remain stored but are hidden from the current grey-box analysis/export by default.
+- Updated the Algorithm panel to show model identity, active policy coordinates, and the derived profile summary.
+
 ### Resource Metrics Scaffold
 
 - Added `src/swarm/resource-model.js` as the first explicit home for drone platform, battery, sensor, compute, and communication accounting.

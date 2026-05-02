@@ -103,6 +103,9 @@ Adaptive algorithm direction:
 Swarm algorithm direction:
 
 - The swarm is moving toward a continuous mixture-of-behaviors controller rather than a set of hard fixed modes.
+- The current model family is `greybox-policy-v1` / `greybox-policy-v1.0`.
+- Future optimizers now see four interpretable policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
+- Low-level controller parameters still matter, but they are derived from those policy coordinates through documented coupling coefficients instead of being optimized independently.
 - Behavior weights will be computed from normalized terrain, AOI, communication, coverage, and mission-progress signals.
 - The current controller now logs normalized signals and derives bounded controls for formation spread, movement speed, assignment pull, AOI focus, and network compliance from those behavior weights.
 - Soft constraints now feed the controller as normalized signals: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They can raise avoidance/efficiency behavior without replacing the AOI, coverage, and relay objectives.
@@ -112,6 +115,7 @@ Swarm algorithm direction:
 - LiDAR area coverage is estimated separately from raw point storage. Each hit contributes a distance-scaled footprint radius for coverage/resolution/redundancy metrics, but it does not create synthetic point-cloud samples.
 - Inter-drone footprint redundancy now feeds back into formation spacing: overlapping LiDAR footprints increase area-spread pressure, while low footprint resolution can tighten spacing for detail.
 - Telemetry can sort saved runs by score, confidence, or subscore, filter to valid runs only, and filter by AOI scenario.
+- Telemetry defaults to the active model family, so old runs remain stored locally but do not mix into grey-box comparison/export by default.
 - `SWARM_ALGORITHM.md` is the detailed design rationale for the math, parameter dependencies, optimization direction, and reasoning history behind this approach.
 
 Formation notes:

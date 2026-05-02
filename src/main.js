@@ -8,10 +8,12 @@ import { searchPath3D as runVoxelPlanner } from './core/planner.js';
 import { almostEqual, clamp, clampInt, createRng, generateSeed, lerp, readNumber } from './core/math.js';
 import {
   DEFAULT_DRONE_RESOURCE_MODEL,
+  DEFAULT_POLICY_COORDINATES,
   DEFAULT_SWARM_BEHAVIOR_PROFILE,
   DEFAULT_SWARM_EVALUATION_PROFILE,
   DRONE_ROLES,
   FORMATION_MODES,
+  GREYBOX_POLICY_MODEL,
   estimateSwarmResourceUse,
   scoreSwarmRun,
   SwarmController,
@@ -2736,6 +2738,7 @@ function startSwarmTelemetryRun() {
   const activeAois = selectedAoiTargets();
   const launchZ = -sim.room.depth * 0.42;
   const launchOrigin = new THREE.Vector3(0, terrainClearanceY(0, launchZ, 0.28), launchZ);
+  const profile = swarmBehaviorProfile();
   sim.swarmTelemetry.startRun({
     scenario: {
       seed: sim.environmentSeed,
@@ -2761,13 +2764,38 @@ function startSwarmTelemetryRun() {
         range: Math.max(38, clamp(readNumber(els.maxRange), 2, 80)),
         voxelSize: clamp(readNumber(els.voxelSize), 0.015, 0.2)
       },
-      performanceBudget: els.performanceBudget.value
+      performanceBudget: els.performanceBudget.value,
+      controlSnapshot: captureControlSnapshot()
     },
     behaviorProfile: {
-      version: sim.swarmController?.behaviorProfile?.version,
-      objective: sim.swarmController?.behaviorProfile?.objectives?.default
+      version: profile.version,
+      modelFamily: profile.modelFamily,
+      modelVersion: profile.modelVersion,
+      objective: profile.objectives?.default,
+      policyCoordinates: { ...(profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      effectivePolicyCoordinates: { ...(profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      derivedProfileSummary: { ...(profile.derivedProfileSummary ?? {}) }
     }
   });
+}
+
+function captureControlSnapshot() {
+  const snapshot = {};
+  document.querySelectorAll('input, select, textarea').forEach((control) => {
+    const key = control.id || control.name;
+    if (!key) {
+      return;
+    }
+    snapshot[key] = {
+      tag: control.tagName.toLowerCase(),
+      type: control.type || null,
+      value: control.type === 'checkbox' ? Boolean(control.checked) : control.value,
+      min: control.min || null,
+      max: control.max || null,
+      step: control.step || null
+    };
+  });
+  return snapshot;
 }
 
 function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
@@ -2798,6 +2826,11 @@ function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
     behaviorWeights: sim.swarmSnapshot?.metrics?.behaviorWeights ?? null,
     normalizedSignals: sim.swarmSnapshot?.metrics?.normalizedSignals ?? null,
     derivedControls: sim.swarmSnapshot?.metrics?.derivedControls ?? null,
+    modelFamily: sim.swarmSnapshot?.metrics?.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+    modelVersion: sim.swarmSnapshot?.metrics?.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    policyCoordinates: sim.swarmSnapshot?.metrics?.policyCoordinates ?? swarmBehaviorProfile().policyCoordinates,
+    effectivePolicyCoordinates: sim.swarmSnapshot?.metrics?.effectivePolicyCoordinates ?? swarmBehaviorProfile().effectivePolicyCoordinates,
+    derivedProfileSummary: sim.swarmSnapshot?.metrics?.derivedProfileSummary ?? swarmBehaviorProfile().derivedProfileSummary,
     behaviorProfileVersion: sim.swarmSnapshot?.metrics?.behaviorProfileVersion ?? null,
     communicationHealth: sim.swarmSnapshot?.metrics?.communicationHealth ?? 1,
     connectedComponents: sim.swarmSnapshot?.metrics?.connectedComponents ?? 0,
@@ -3615,6 +3648,9 @@ function activeBehaviorProfile() {
   const objectiveKey = els.objectiveProfile?.value ?? DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives.default;
   return {
     ...DEFAULT_SWARM_BEHAVIOR_PROFILE,
+    modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
+    modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
+    policyCoordinates: { ...DEFAULT_POLICY_COORDINATES },
     objectives: {
       ...DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives,
       default: objectiveKey
@@ -3625,10 +3661,7 @@ function activeBehaviorProfile() {
 function applyObjectiveProfileChange() {
   const profile = activeBehaviorProfile();
   if (sim.swarmController) {
-    sim.swarmController.behaviorProfile = profile;
-    sim.swarmController.formationGraph.behaviorProfile = profile;
-    sim.swarmController.taskAllocator.behaviorProfile = profile;
-    sim.swarmController.metrics.behaviorProfileVersion = profile.version;
+    sim.swarmController.setBehaviorProfile(profile);
   }
   noteTelemetryControlChange('objective-profile');
   logMessage(`Objective profile set to ${profile.objectives.profiles[profile.objectives.default]?.label ?? profile.objectives.default}.`);
@@ -4105,9 +4138,15 @@ function renderAlgorithmPanel() {
   const objective = profile.objectives.profiles[objectiveKey];
   renderMetricList(els.algorithmWeights, metrics.behaviorWeights ?? {}, { percent: true, sort: true });
   renderMetricList(els.algorithmSignals, metrics.normalizedSignals ?? {}, { percent: true, maxRows: 9 });
-  renderMetricList(els.algorithmControls, flattenAlgorithmControls(metrics.derivedControls ?? {}), { maxRows: 12 });
+  renderMetricList(els.algorithmControls, {
+    ...(metrics.policyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES),
+    ...flattenAlgorithmControls(metrics.derivedProfileSummary ?? profile.derivedProfileSummary ?? {}),
+    ...flattenAlgorithmControls(metrics.derivedControls ?? {})
+  }, { maxRows: 16 });
   renderMetricList(els.algorithmRoles, swarmRoleCounts(), { barMax: Math.max(sim.swarmController?.agents?.length ?? 1, 1) });
   renderMetricList(els.algorithmObjective, {
+    modelFamily: profile.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+    modelVersion: profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
     objective: objective?.label ?? objectiveKey,
     profile: profile.version,
     formation: metrics.formationMode ?? els.swarmFormation.value,
@@ -4195,7 +4234,7 @@ function toggleTelemetryPanel() {
 }
 
 async function refreshTelemetryPanel() {
-  const allRuns = await sim.swarmTelemetry.listRuns({ limit: 50 });
+  const allRuns = await sim.swarmTelemetry.listRuns({ limit: 50, modelFamily: GREYBOX_POLICY_MODEL.modelFamily });
   const validCount = allRuns.filter((run) => run.validity?.complete).length;
   const scenarioFilteredRuns = filterTelemetryRunsByScenario(allRuns, els.telemetryScenarioFilter.value);
   const runs = sortTelemetryRuns(
@@ -4210,7 +4249,7 @@ async function refreshTelemetryPanel() {
   if (!runs.length) {
     els.telemetryRuns.innerHTML = allRuns.length
       ? '<div class="telemetry-run"><strong>No matching runs</strong><span>Try disabling Valid only or changing the sort mode.</span></div>'
-      : '<div class="telemetry-run"><strong>No saved runs yet</strong><span>Pause, reset, or complete a swarm mission to persist telemetry.</span></div>';
+      : `<div class="telemetry-run"><strong>No ${escapeHtml(GREYBOX_POLICY_MODEL.modelFamily)} runs yet</strong><span>Old telemetry remains saved but is hidden from this model-family view.</span></div>`;
     return;
   }
 
@@ -4221,11 +4260,13 @@ async function refreshTelemetryPanel() {
     const behavior = run.behaviorProfile?.version ?? 'unknown profile';
     const scoring = scoreRunForActiveObjective(run);
     const components = scoring.components ?? {};
+    const pareto = scoring.paretoVector ?? {};
     const temporal = scoring.temporalMeasures ?? {};
     return `
       <div class="telemetry-run">
-        <strong>${escapeHtml(run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / confidence ${formatScore(scoring.confidence)}</strong>
+        <strong>${escapeHtml(run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
         <span>${(run.totals?.rawHits ?? 0).toLocaleString()} raw hits, ${(run.totals?.pointVoxels ?? 0).toLocaleString()} point voxels, ${(run.totals?.focusedHits ?? 0).toLocaleString()} focused, k${run.samples?.at?.(-1)?.adaptiveNeighborTarget ?? run.network?.avgAdaptiveNeighborTarget?.toFixed?.(1) ?? '--'}</span>
+        <span>Pareto coverage ${formatScore(pareto.coverage_area)}, AOI detail ${formatScore(pareto.aoi_detail)}, safety ${formatScore(pareto.risk_safety)}, resource ${formatScore(pareto.resource_efficiency)}</span>
         <span>AOI ${formatScore(components.aoiQuality)}, coverage ${formatScore(components.coverage)}, network ${formatScore(components.networkResilience)}, compute ${formatScore(components.computeEfficiency)}, energy ${formatScore(components.energyProxy)}, smooth ${formatScore(components.adaptationSmoothness)}, safety ${formatScore(components.constraintSafety)}</span>
         <span>${formatMetricValue(temporal.avgNewPointVoxelsPerSecond ?? 0)} new vox/s, ${formatMetricValue(temporal.avgUniqueFootprintAreaPerSecond ?? 0)} m2/s footprint, ${formatScore(1 - (temporal.avgFootprintRedundancyRatio ?? 0))} non-overlap</span>
         <span>${formatMetricValue(temporal.usefulAoiHitRateAfterContact ?? 0)} AOI hits/s after contact, ${formatMetricValue(temporal.avgBehaviorWeightChangePerSecond ?? 0)} weight-change/s, ${formatMetricValue(temporal.riskExposureSeconds ?? 0)} risk s</span>
@@ -4275,7 +4316,7 @@ function sortTelemetryRuns(runs, sortMode) {
 }
 
 async function exportTelemetryRuns() {
-  const runs = await sim.swarmTelemetry.exportRuns();
+  const runs = await sim.swarmTelemetry.exportRuns({ modelFamily: GREYBOX_POLICY_MODEL.modelFamily });
   if (!runs.length) {
     logMessage('No telemetry runs saved yet.');
     return;
@@ -4285,7 +4326,7 @@ async function exportTelemetryRuns() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `swarm-telemetry-runs-${sim.environmentSeed}.json`;
+  anchor.download = `swarm-telemetry-${GREYBOX_POLICY_MODEL.modelFamily}-${GREYBOX_POLICY_MODEL.modelVersion}-${sim.environmentSeed}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
   logMessage(`Telemetry exported with ${runs.length.toLocaleString()} saved run(s).`);

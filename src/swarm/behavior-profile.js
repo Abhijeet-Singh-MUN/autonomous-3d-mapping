@@ -9,8 +9,67 @@ export const BEHAVIOR_PRIMITIVES = {
   AVOIDANCE: 'avoidance'
 };
 
+export const GREYBOX_POLICY_MODEL = {
+  modelFamily: 'greybox-policy-v1',
+  modelVersion: 'greybox-policy-v1.0'
+};
+
+export const DEFAULT_POLICY_COORDINATES = {
+  coverage_area: 0.35,
+  aoi_detail: 0.3,
+  risk_safety: 0.2,
+  resource_efficiency: 0.15
+};
+
+export const POLICY_COORDINATE_REGISTRY = [
+  { key: 'coverage_area', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.coverage_area, group: 'pareto', reason: 'Biases the derived controller toward broad unique footprint coverage and frontier exploration.' },
+  { key: 'aoi_detail', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.aoi_detail, group: 'pareto', reason: 'Biases the derived controller toward focused AOI dwell, verification, and tighter sensing.' },
+  { key: 'risk_safety', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.risk_safety, group: 'pareto', reason: 'Biases the derived controller toward avoidance, communication resilience, and stable assignments.' },
+  { key: 'resource_efficiency', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.resource_efficiency, group: 'pareto', reason: 'Biases the derived controller toward lower path, battery, compute, and mission-time pressure.' }
+];
+
+export const POLICY_COUPLINGS = {
+  version: 'greybox-policy-couplings-v1',
+  behaviorMixer: {
+    frontierGain: { base: 'behaviorMixer.frontierGain', coverage_area: 0.16, resource_efficiency: -0.05, min: 0.12, max: 0.62 },
+    aoiGain: { base: 'behaviorMixer.aoiGain', aoi_detail: 0.18, risk_safety: -0.06, min: 0.12, max: 0.72 },
+    relayGain: { base: 'behaviorMixer.relayGain', risk_safety: 0.08, resource_efficiency: 0.06, min: 0.14, max: 0.7 },
+    verifyGain: { base: 'behaviorMixer.verifyGain', aoi_detail: 0.14, min: 0.06, max: 0.52 },
+    avoidanceGain: { base: 'behaviorMixer.avoidanceGain', risk_safety: 0.12, min: 0.12, max: 0.58 }
+  },
+  constraints: {
+    aoiRiskGain: { base: 'constraints.aoiRiskGain', risk_safety: 0.22, aoi_detail: -0.05, min: 0.08, max: 0.7 },
+    riskAvoidanceBoost: { base: 'constraints.riskAvoidanceBoost', risk_safety: 0.28, min: 0.12, max: 0.78 },
+    batteryEfficiencyGain: { base: 'constraints.batteryEfficiencyGain', resource_efficiency: 0.3, min: 0.06, max: 0.55 },
+    footprintRedundancySpreadGain: { base: 'constraints.footprintRedundancySpreadGain', coverage_area: 0.34, aoi_detail: -0.08, min: 0.08, max: 0.68 },
+    footprintResolutionTightenGain: { base: 'constraints.footprintResolutionTightenGain', aoi_detail: 0.22, min: 0.06, max: 0.42 }
+  },
+  roleBalance: {
+    relayWeakCommsShare: { base: 'roleBalance.relayWeakCommsShare', risk_safety: 0.1, resource_efficiency: 0.03, min: 0.16, max: 0.44 },
+    verifierAoiShare: { base: 'roleBalance.verifierAoiShare', aoi_detail: 0.12, min: 0.08, max: 0.34 },
+    scoutFrontierShare: { base: 'roleBalance.scoutFrontierShare', coverage_area: 0.08, resource_efficiency: -0.03, min: 0.24, max: 0.48 }
+  },
+  taskScoring: {
+    continuityBias: { base: 'taskScoring.continuityBias', risk_safety: 0.18, aoi_detail: 0.1, min: 0.08, max: 0.62 },
+    informationGainWeight: { base: 'taskScoring.informationGainWeight', coverage_area: 0.08, aoi_detail: 0.06, min: 0.18, max: 0.52 }
+  },
+  network: {
+    weakHealthThreshold: { base: 'network.weakHealthThreshold', risk_safety: 0.08, min: 0.55, max: 0.9 },
+    softRangeFactor: { base: 'network.softRangeFactor', resource_efficiency: -0.08, risk_safety: 0.04, min: 0.78, max: 1.05 }
+  },
+  formation: {
+    targetBlendModeChange: { base: 'formation.targetBlendModeChange', risk_safety: 0.08, resource_efficiency: 0.04, min: 0.16, max: 0.38 }
+  },
+  sensing: {
+    focusRangeRadiusFactor: { base: 'sensing.focusRangeRadiusFactor', aoi_detail: 0.48, resource_efficiency: -0.12, min: 1.05, max: 2.4 },
+    focusStrengthMin: { base: 'sensing.focusStrengthMin', aoi_detail: 0.08, resource_efficiency: -0.03, min: 0.05, max: 0.22 }
+  }
+};
+
 export const PARAMETER_DEPENDENCY_GRAPH = [
   { from: 'measuredSignals', to: 'normalizedSignals', reason: 'Clamp live terrain, AOI, scan, and network inputs to comparable 0..1 ranges.' },
+  { from: 'policyCoordinates', to: 'derivedProfile', reason: 'Map four optimizer-facing Pareto coordinates through documented grey-box coupling coefficients.' },
+  { from: 'stateSignals', to: 'derivedProfile', reason: 'Allow bounded runtime nudges without mutating the base policy profile.' },
   { from: 'normalizedSignals', to: 'constraintSignals', reason: 'Expose soft risk, time, battery, and compute pressure before behavior mixing.' },
   { from: 'normalizedSignals', to: 'behaviorWeights', reason: 'Compute the continuous primitive mixture on the behavior simplex.' },
   { from: 'behaviorWeights', to: 'derivedControls', reason: 'Translate primitive pressure into bounded runtime gains.' },
@@ -19,6 +78,10 @@ export const PARAMETER_DEPENDENCY_GRAPH = [
 
 export const DEFAULT_SWARM_BEHAVIOR_PROFILE = {
   version: 'swarm-behavior-profile-v1',
+  modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
+  modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
+  policyCoordinates: { ...DEFAULT_POLICY_COORDINATES },
+  policyCouplingsVersion: POLICY_COUPLINGS.version,
   roleBalance: {
     weakCommunicationThreshold: 0.72,
     frontierPressureThreshold: 0.08,
@@ -218,6 +281,8 @@ export const DEFAULT_SWARM_BEHAVIOR_PROFILE = {
 
 export const DEFAULT_SWARM_EVALUATION_PROFILE = {
   version: 'swarm-evaluation-profile-v1',
+  modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
+  modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
   normalizers: {
     aoiRawHits: 180,
     aoiFocusedHits: 90,
@@ -249,22 +314,8 @@ export const DEFAULT_SWARM_EVALUATION_PROFILE = {
   }
 };
 
-export const OPTIMIZER_PARAMETER_REGISTRY = [
-  { key: 'behaviorMixer.frontierGain', min: 0.12, max: 0.58, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.behaviorMixer.frontierGain, group: 'behavior', reason: 'Controls exploration pressure toward frontier tasks.' },
-  { key: 'behaviorMixer.aoiGain', min: 0.14, max: 0.7, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.behaviorMixer.aoiGain, group: 'behavior', reason: 'Controls how strongly AOI presence pulls the mixture.' },
-  { key: 'behaviorMixer.relayGain', min: 0.14, max: 0.72, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.behaviorMixer.relayGain, group: 'behavior', reason: 'Controls network-preservation pressure under weak communication.' },
-  { key: 'behaviorMixer.verifyGain', min: 0.06, max: 0.46, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.behaviorMixer.verifyGain, group: 'behavior', reason: 'Controls rescan/verification pressure after scan progress increases.' },
-  { key: 'behaviorMixer.avoidanceGain', min: 0.12, max: 0.56, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.behaviorMixer.avoidanceGain, group: 'behavior', reason: 'Controls obstacle/corridor caution in the behavior mixture.' },
-  { key: 'constraints.aoiRiskGain', min: 0.08, max: 0.62, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.constraints.aoiRiskGain, group: 'constraints', reason: 'Controls how much close AOI work increases local risk pressure.' },
-  { key: 'constraints.riskAvoidanceBoost', min: 0.12, max: 0.72, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.constraints.riskAvoidanceBoost, group: 'constraints', reason: 'Controls how strongly soft risk increases avoidance behavior.' },
-  { key: 'constraints.batteryEfficiencyGain', min: 0.06, max: 0.48, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.constraints.batteryEfficiencyGain, group: 'constraints', reason: 'Controls how low battery pressure biases toward efficient movement.' },
-  { key: 'constraints.footprintRedundancySpreadGain', min: 0.08, max: 0.55, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.constraints.footprintRedundancySpreadGain, group: 'constraints', reason: 'Controls how strongly overlapping LiDAR footprints spread drones for area coverage.' },
-  { key: 'roleBalance.relayWeakCommsShare', min: 0.18, max: 0.42, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.roleBalance.relayWeakCommsShare, group: 'roles', reason: 'Controls how many drones become relays during weak communication.' },
-  { key: 'roleBalance.verifierAoiShare', min: 0.1, max: 0.32, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.roleBalance.verifierAoiShare, group: 'roles', reason: 'Controls verifier share when AOIs exist.' },
-  { key: 'network.weakHealthThreshold', min: 0.55, max: 0.88, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.network.weakHealthThreshold, group: 'network', reason: 'Controls when adaptive neighbor pressure activates.' },
-  { key: 'sensing.focusRangeRadiusFactor', min: 1.1, max: 2.3, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.sensing.focusRangeRadiusFactor, group: 'sensing', reason: 'Controls AOI focus activation radius relative to AOI size.' },
-  { key: 'taskScoring.continuityBias', min: 0.08, max: 0.58, default: DEFAULT_SWARM_BEHAVIOR_PROFILE.taskScoring.continuityBias, group: 'tasking', reason: 'Controls assignment stability versus fast retasking.' }
-];
+export const LOW_LEVEL_PARAMETER_REGISTRY = flattenCouplingRegistry(POLICY_COUPLINGS);
+export const OPTIMIZER_PARAMETER_REGISTRY = POLICY_COORDINATE_REGISTRY;
 
 export function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
@@ -272,6 +323,137 @@ export function clamp01(value) {
 
 function clampRange(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function flattenCouplingRegistry(couplings) {
+  return Object.entries(couplings)
+    .filter(([, group]) => group && typeof group === 'object' && !Array.isArray(group))
+    .flatMap(([groupKey, group]) => Object.entries(group).map(([key, coupling]) => ({
+      key: `${groupKey}.${key}`,
+      min: coupling.min,
+      max: coupling.max,
+      base: coupling.base,
+      group: groupKey,
+      reason: 'Derived from grey-box policy coordinates through documented coupling coefficients.'
+    })));
+}
+
+export function normalizePolicyCoordinates(policyCoordinates = DEFAULT_POLICY_COORDINATES) {
+  const entries = POLICY_COORDINATE_REGISTRY.map(({ key }) => [
+    key,
+    clamp01(Number.isFinite(policyCoordinates?.[key]) ? policyCoordinates[key] : DEFAULT_POLICY_COORDINATES[key])
+  ]);
+  const total = entries.reduce((sum, [, value]) => sum + value, 0);
+  if (total <= 1e-8) {
+    return { ...DEFAULT_POLICY_COORDINATES };
+  }
+  return Object.fromEntries(entries.map(([key, value]) => [key, value / total]));
+}
+
+export function deriveBehaviorProfile(
+  baseProfile = DEFAULT_SWARM_BEHAVIOR_PROFILE,
+  policyCoordinates = baseProfile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+  stateSignals = {}
+) {
+  const psi = normalizePolicyCoordinates(policyCoordinates);
+  const derived = cloneBehaviorProfile(baseProfile);
+  const stateNudges = {
+    aoi_detail: clamp01(stateSignals.aoiCount > 0 ? (stateSignals.aoiPressure ?? 1) * 0.08 : 0),
+    risk_safety: clamp01(Math.max(stateSignals.riskPressure ?? 0, stateSignals.networkPressure ?? 0) * 0.08),
+    resource_efficiency: clamp01(Math.max(stateSignals.batteryPressure ?? 0, stateSignals.computePressure ?? 0) * 0.08),
+    coverage_area: clamp01((stateSignals.frontierPressure ?? stateSignals.frontierDensity ?? 0) * 0.06)
+  };
+  const effectivePsi = normalizePolicyCoordinates({
+    coverage_area: psi.coverage_area + stateNudges.coverage_area,
+    aoi_detail: psi.aoi_detail + stateNudges.aoi_detail,
+    risk_safety: psi.risk_safety + stateNudges.risk_safety,
+    resource_efficiency: psi.resource_efficiency + stateNudges.resource_efficiency
+  });
+
+  Object.entries(POLICY_COUPLINGS).forEach(([groupKey, group]) => {
+    if (!derived[groupKey] || typeof group !== 'object' || Array.isArray(group)) {
+      return;
+    }
+    Object.entries(group).forEach(([paramKey, coupling]) => {
+      const baseValue = readPath(baseProfile, coupling.base);
+      const delta = POLICY_COORDINATE_REGISTRY.reduce((sum, { key }) => (
+        sum + (coupling[key] ?? 0) * (effectivePsi[key] ?? 0)
+      ), 0);
+      derived[groupKey][paramKey] = clampRange(
+        (Number.isFinite(baseValue) ? baseValue : 0) + delta,
+        coupling.min,
+        coupling.max
+      );
+    });
+  });
+
+  derived.modelFamily = GREYBOX_POLICY_MODEL.modelFamily;
+  derived.modelVersion = GREYBOX_POLICY_MODEL.modelVersion;
+  derived.version = `${baseProfile.version ?? 'swarm-behavior-profile'}+${GREYBOX_POLICY_MODEL.modelVersion}`;
+  derived.policyCoordinates = psi;
+  derived.effectivePolicyCoordinates = effectivePsi;
+  derived.policyCouplingsVersion = POLICY_COUPLINGS.version;
+  derived.derivedProfileSummary = summarizeDerivedProfile(derived);
+  return derived;
+}
+
+function cloneBehaviorProfile(profile) {
+  return {
+    ...profile,
+    policyCoordinates: { ...(profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+    effectivePolicyCoordinates: { ...(profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+    roleBalance: { ...profile.roleBalance },
+    behaviorMixer: { ...profile.behaviorMixer },
+    constraints: { ...profile.constraints },
+    taskScoring: {
+      ...profile.taskScoring,
+      roleWeights: Object.fromEntries(Object.entries(profile.taskScoring?.roleWeights ?? {}).map(([role, weights]) => [role, { ...weights }]))
+    },
+    movement: {
+      ...profile.movement,
+      assignmentBlend: { ...profile.movement?.assignmentBlend },
+      roleSpeedScale: { ...profile.movement?.roleSpeedScale }
+    },
+    network: { ...profile.network },
+    formation: { ...profile.formation },
+    sensing: {
+      ...profile.sensing,
+      roleAoiFocusScale: { ...profile.sensing?.roleAoiFocusScale }
+    },
+    relay: { ...profile.relay },
+    objectives: {
+      ...profile.objectives,
+      profiles: Object.fromEntries(Object.entries(profile.objectives?.profiles ?? {}).map(([key, objective]) => [
+        key,
+        { ...objective, weights: { ...objective.weights } }
+      ]))
+    },
+    evaluation: profile.evaluation ? { ...profile.evaluation } : profile.evaluation,
+    derivedProfileSummary: profile.derivedProfileSummary ? { ...profile.derivedProfileSummary } : undefined
+  };
+}
+
+function readPath(source, path) {
+  return String(path).split('.').reduce((value, key) => value?.[key], source);
+}
+
+function summarizeDerivedProfile(profile) {
+  return {
+    aoiGain: profile.behaviorMixer.aoiGain,
+    frontierGain: profile.behaviorMixer.frontierGain,
+    relayGain: profile.behaviorMixer.relayGain,
+    verifyGain: profile.behaviorMixer.verifyGain,
+    avoidanceGain: profile.behaviorMixer.avoidanceGain,
+    aoiRiskGain: profile.constraints.aoiRiskGain,
+    riskAvoidanceBoost: profile.constraints.riskAvoidanceBoost,
+    footprintSpreadGain: profile.constraints.footprintRedundancySpreadGain,
+    footprintTightenGain: profile.constraints.footprintResolutionTightenGain,
+    focusRadiusFactor: profile.sensing.focusRangeRadiusFactor,
+    continuityBias: profile.taskScoring.continuityBias,
+    verifierAoiShare: profile.roleBalance.verifierAoiShare,
+    relayWeakCommsShare: profile.roleBalance.relayWeakCommsShare,
+    batteryEfficiencyGain: profile.constraints.batteryEfficiencyGain
+  };
 }
 
 export function normalizeWeights(weights) {
@@ -440,6 +622,11 @@ export function computeControllerState({
 
   return {
     profileVersion: profile.version,
+    modelFamily: profile.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+    modelVersion: profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    policyCoordinates: profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+    effectivePolicyCoordinates: profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+    derivedProfileSummary: profile.derivedProfileSummary ?? summarizeDerivedProfile(profile),
     objective: profile.objectives.default,
     normalizedSignals,
     behaviorWeights,
@@ -569,13 +756,33 @@ export function scoreSwarmRun(run, profile = DEFAULT_SWARM_BEHAVIOR_PROFILE) {
   const weights = objective.weights ?? {};
   const weightedScore = Object.entries(weights).reduce((sum, [key, weight]) => sum + (components[key] ?? 0) * weight, 0);
   const weightTotal = Object.values(weights).reduce((sum, value) => sum + value, 0) || 1;
+  const policyCoordinates = normalizePolicyCoordinates(run?.policyCoordinates ?? run?.behaviorProfile?.policyCoordinates ?? profile.policyCoordinates);
+  const paretoVector = {
+    coverage_area: components.coverage,
+    aoi_detail: components.aoiQuality,
+    risk_safety: clamp01(components.constraintSafety * 0.44 + components.networkResilience * 0.38 + components.adaptationSmoothness * 0.18),
+    resource_efficiency: clamp01(components.energyProxy * 0.52 + components.computeEfficiency * 0.34 + components.timeEfficiency * 0.14)
+  };
+  const paretoLoss = Object.entries(policyCoordinates).reduce((sum, [key, weight]) => {
+    const score = paretoVector[key] ?? 0;
+    return sum + weight * Math.abs(1 - score);
+  }, 0);
+  const scalarScore = clamp01(1 - paretoLoss) * validityComplete;
+  const objectiveTotal = clamp01(weightedScore / weightTotal) * validityComplete;
 
   return {
     objectiveKey,
     objectiveLabel: objective.label,
-    schemaVersion: 2,
+    schemaVersion: 3,
+    modelFamily: run?.modelFamily ?? run?.behaviorProfile?.modelFamily ?? profile.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+    modelVersion: run?.modelVersion ?? run?.behaviorProfile?.modelVersion ?? profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    policyCoordinates,
+    paretoVector,
+    paretoLoss: validityComplete ? paretoLoss : 1,
+    scalarScore,
+    objectiveTotal,
     evaluationProfileVersion: evaluation.version,
-    total: clamp01(weightedScore / weightTotal) * validityComplete,
+    total: scalarScore,
     validMultiplier: validityComplete,
     confidence: clamp01((rawMeasures.scanPasses / 20) * 0.5 + (rawMeasures.telemetrySamples / 10) * 0.5) * validityComplete,
     components,

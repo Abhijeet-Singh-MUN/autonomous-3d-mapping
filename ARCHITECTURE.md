@@ -44,9 +44,9 @@ src/
 5. Each scan pass asks every active drone to cast its configured LiDAR fan against the scene meshes. AOI focus rays are role-weighted and added only when a drone is close enough to an AOI.
 6. Ray hits are voxel-deduplicated into `sim.voxelMap`; each raw voxel stores averaged position, hit count, distance sum, and AOI/focus metadata.
 7. Each LiDAR hit also updates a lightweight footprint-coverage estimate. The footprint radius grows with hit distance and scan angular spacing, records approximate unique area, redundancy, and resolution score, and does not create synthetic point-cloud points.
-8. Runtime behavior computes normalized signals, behavior weights, derived controls, and an explicit dependency graph from the central behavior profile.
+8. Runtime behavior derives the active grey-box behavior profile from policy coordinates, computes normalized signals, behavior weights, derived controls, and an explicit dependency graph from the central behavior profile.
 9. Point-cloud rendering samples raw voxel maps up to the visible point cap and uploads positions/colors into reusable typed-array buffers.
-10. Swarm telemetry samples behavior weights, derived controls, role counts, network state, AOI proximity, scan totals, path length, placeholder resource use, temporal rate metrics, and validity flags into local IndexedDB run records.
+10. Swarm telemetry samples model family/version, policy coordinates, derived profile summary, behavior weights, derived controls, role counts, network state, AOI proximity, scan totals, path length, placeholder resource use, temporal rate metrics, and validity flags into local IndexedDB run records.
 11. PLY export currently uses raw stored points only, not post-processed splats or only visible sampled points.
 
 ## Current Performance Bottlenecks
@@ -86,8 +86,11 @@ src/
 Behavior constants now begin moving through `src/swarm/behavior-profile.js`, which owns the default behavior profile, objective profiles, normalized behavior-weight calculation, role target calculation, and adaptive neighbor target calculation. Runtime swarm control should follow an explicit pipeline:
 
 ```text
+psi -> derivedProfile
 state_t -> normalized signals -> behavior weights -> derived controls -> action_t -> state_t+1
 ```
+
+The active model family is `greybox-policy-v1` / `greybox-policy-v1.0`. Optimizers and future surrogate models should see four policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`. Low-level behavior gains, role shares, sensing multipliers, network thresholds, task continuity, and footprint spread remain important, but they are derived through documented coupling coefficients in `behavior-profile.js` instead of being optimized independently.
 
 Nested parameter dependencies are allowed only when they are explicit, logged, and acyclic within a single timestep. Optimizers should tune parameter profiles offline, while the runtime controller remains locally adaptive to terrain, AOIs, communication health, and safety constraints.
 
@@ -102,7 +105,9 @@ Soft constraints are now part of the normalized signal layer. AOI proximity risk
 
 Saved runs are scored with the active objective profile. The current score components are AOI quality, coverage, network resilience, time efficiency, compute efficiency, energy/path proxy, adaptation smoothness, and constraint safety. Scores retain raw measures, temporal measures, normalization targets, and confidence metadata. Invalid runs remain in the dataset with validity flags, but their total score is suppressed so incomplete simulations do not win comparisons.
 
-`src/swarm/behavior-profile.js` now also owns the first evaluation profile and optimizer-parameter registry. The evaluation profile centralizes scoring normalizers and validity thresholds. The optimizer registry deliberately exposes only a small high-impact parameter set, so future Bayesian optimization searches the shape of the adaptive controller rather than all constants at once.
+`src/swarm/behavior-profile.js` now also owns the first evaluation profile and policy-coordinate registry. The evaluation profile centralizes scoring normalizers and validity thresholds. The optimizer registry deliberately exposes only a small high-impact policy-coordinate set, so future Bayesian optimization searches the shape of the adaptive controller rather than all constants at once.
+
+Telemetry records are compatibility-filtered by model family. New grey-box runs save the model namespace and are shown by default in the telemetry panel; older runs remain in IndexedDB but are hidden from the current comparison view. JSON export filenames include the model family and version so datasets from different algorithm families do not silently mix.
 
 Coverage scoring blends point-voxel growth with footprint area. Footprint metrics approximate how much terrain/object surface the LiDAR sampled at the requested angular resolution and how much of that footprint was redundant overlap. This keeps area coverage measurable without adding derived splat points to the live cloud.
 

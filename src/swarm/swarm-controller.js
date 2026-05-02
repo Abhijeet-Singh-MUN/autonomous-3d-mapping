@@ -6,6 +6,9 @@ import {
   computeControllerState,
   computeBehaviorWeights,
   DEFAULT_SWARM_BEHAVIOR_PROFILE,
+  deriveBehaviorProfile,
+  DEFAULT_POLICY_COORDINATES,
+  normalizePolicyCoordinates,
   roleCountTargets
 } from './behavior-profile.js';
 import { CommunicationGraph } from './communication-graph.js';
@@ -19,7 +22,9 @@ import { TerrainClassifier } from './terrain-classifier.js';
 export class SwarmController {
   constructor(config = {}) {
     this.config = { ...DEFAULT_SWARM_CONFIG, ...config };
-    this.behaviorProfile = config.behaviorProfile ?? DEFAULT_SWARM_BEHAVIOR_PROFILE;
+    this.baseBehaviorProfile = config.behaviorProfile ?? DEFAULT_SWARM_BEHAVIOR_PROFILE;
+    this.policyCoordinates = normalizePolicyCoordinates(this.baseBehaviorProfile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES);
+    this.behaviorProfile = deriveBehaviorProfile(this.baseBehaviorProfile, this.policyCoordinates);
     this.agents = [];
     this.communicationGraph = new CommunicationGraph({
       range: this.config.communicationRange,
@@ -41,10 +46,29 @@ export class SwarmController {
       behaviorWeights: computeBehaviorWeights({}, this.behaviorProfile),
       normalizedSignals: {},
       derivedControls: {},
+      policyCoordinates: this.behaviorProfile.policyCoordinates,
+      effectivePolicyCoordinates: this.behaviorProfile.effectivePolicyCoordinates,
+      derivedProfileSummary: this.behaviorProfile.derivedProfileSummary,
       dependencyGraph: [],
+      modelFamily: this.behaviorProfile.modelFamily,
+      modelVersion: this.behaviorProfile.modelVersion,
       behaviorProfileVersion: this.behaviorProfile.version,
       adaptiveNeighborTarget: this.config.maxNeighbors
     };
+  }
+
+  setBehaviorProfile(profile) {
+    this.baseBehaviorProfile = profile ?? DEFAULT_SWARM_BEHAVIOR_PROFILE;
+    this.policyCoordinates = normalizePolicyCoordinates(this.baseBehaviorProfile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES);
+    this.behaviorProfile = deriveBehaviorProfile(this.baseBehaviorProfile, this.policyCoordinates);
+    this.formationGraph.behaviorProfile = this.behaviorProfile;
+    this.taskAllocator.behaviorProfile = this.behaviorProfile;
+    this.metrics.behaviorProfileVersion = this.behaviorProfile.version;
+    this.metrics.modelFamily = this.behaviorProfile.modelFamily;
+    this.metrics.modelVersion = this.behaviorProfile.modelVersion;
+    this.metrics.policyCoordinates = this.behaviorProfile.policyCoordinates;
+    this.metrics.effectivePolicyCoordinates = this.behaviorProfile.effectivePolicyCoordinates;
+    this.metrics.derivedProfileSummary = this.behaviorProfile.derivedProfileSummary;
   }
 
   initializeAgents({ count = this.config.droneCount, origin = new THREE.Vector3(), createMesh = null } = {}) {
@@ -97,12 +121,17 @@ export class SwarmController {
       aoiCount: aois.length
     });
     const measuredCommunicationHealth = Math.min(communicationHealth, localCommunicationHealth);
+    const profileSignals = {
+      ...environmentSignals,
+      communicationHealth: measuredCommunicationHealth,
+      networkPressure: 1 - measuredCommunicationHealth,
+      aoiCount: aois.length
+    };
+    this.behaviorProfile = deriveBehaviorProfile(this.baseBehaviorProfile, this.policyCoordinates, profileSignals);
+    this.formationGraph.behaviorProfile = this.behaviorProfile;
+    this.taskAllocator.behaviorProfile = this.behaviorProfile;
     const controllerState = computeControllerState({
-      signals: {
-        ...environmentSignals,
-        communicationHealth: measuredCommunicationHealth,
-        aoiCount: aois.length
-      },
+      signals: profileSignals,
       baseNeighbors: this.config.maxNeighbors,
       agentCount: this.agents.length
     }, this.behaviorProfile);
@@ -160,7 +189,12 @@ export class SwarmController {
       behaviorWeights,
       normalizedSignals,
       derivedControls,
+      policyCoordinates: controllerState.policyCoordinates,
+      effectivePolicyCoordinates: controllerState.effectivePolicyCoordinates,
+      derivedProfileSummary: controllerState.derivedProfileSummary,
       dependencyGraph,
+      modelFamily: controllerState.modelFamily,
+      modelVersion: controllerState.modelVersion,
       behaviorProfileVersion: this.behaviorProfile.version,
       adaptiveNeighborTarget: this.communicationGraph.maxNeighbors,
       pointSamples: this.mapFusion.exportPointTiles().reduce((sum, tile) => sum + tile.pointCount, 0)
@@ -256,7 +290,12 @@ export class SwarmController {
       config: { ...this.config },
       behaviorProfile: {
         version: this.behaviorProfile.version,
-        objective: this.behaviorProfile.objectives.default
+        objective: this.behaviorProfile.objectives.default,
+        modelFamily: this.behaviorProfile.modelFamily,
+        modelVersion: this.behaviorProfile.modelVersion,
+        policyCoordinates: { ...this.behaviorProfile.policyCoordinates },
+        effectivePolicyCoordinates: { ...this.behaviorProfile.effectivePolicyCoordinates },
+        derivedProfileSummary: { ...this.behaviorProfile.derivedProfileSummary }
       },
       agents: this.agents.map((agent) => agent.snapshot()),
       communication: this.communicationGraph.snapshot(),

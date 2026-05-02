@@ -7,6 +7,7 @@
 - Remote: `origin https://github.com/Abhijeet-Singh-MUN/autonomous-3d-mapping.git`
 - Baseline branch: `main` keeps the posted single-drone room project preserved.
 - Current branch direction: terrain/swarm simulator for adaptive 3D mapping and point-cloud dataset capture.
+- Active swarm algorithm model: `greybox-policy-v1` / `greybox-policy-v1.0`.
 
 ## Run Commands
 
@@ -60,6 +61,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - Drones launch from a distributed square ground lattice, then take off into formation behavior.
 - Swarm Behavior Kernel V1 is active: roles rebalance among scouts, mappers, relays, and verifiers based on communication health, frontier pressure, terrain class, and AOI presence.
 - `src/swarm/behavior-profile.js` is now the first central parameter registry for behavior weights, role shares, task scoring, movement, sensing, network, relay, formation, and objective profiles.
+- The active behavior model is a grey-box policy-coordinate hierarchy: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency` derive the lower-level behavior profile through documented coupling coefficients.
 - The controller computes normalized signals, behavior weights, derived controls, and a dependency graph; runtime motion, sensing focus, network compliance, and formation spread consume those derived controls.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.
@@ -69,7 +71,8 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - `src/swarm/run-telemetry.js` now saves per-sample temporal metrics and per-run temporal summaries, including new voxels/sec, AOI hit rate after contact, energy/compute rate, network fragmentation time, and behavior-weight change rate.
 - LiDAR footprint coverage is now tracked as metrics only: total/unique/redundant footprint area, redundancy ratio, and resolution score. It does not create synthetic point-cloud samples.
 - Inter-drone footprint redundancy now feeds back into topology by expanding formation radius/vertical spacing for area coverage, while low resolution can tighten spacing for detail.
-- `src/swarm/behavior-profile.js` now includes `DEFAULT_SWARM_EVALUATION_PROFILE` for scoring/validity thresholds and `OPTIMIZER_PARAMETER_REGISTRY` for the small first Bayesian-optimization search space.
+- `src/swarm/behavior-profile.js` now includes `DEFAULT_SWARM_EVALUATION_PROFILE` for scoring/validity thresholds and `OPTIMIZER_PARAMETER_REGISTRY` for the four policy-coordinate Bayesian-optimization search space.
+- Telemetry records now carry model family/version, policy coordinates, derived profile summaries, Pareto vector scores, scalar loss, and scalar display score. The telemetry panel/export default to `greybox-policy-v1`, leaving old runs stored but hidden from current-model comparisons.
 - Telemetry can filter to valid runs or AOI scenario and sort saved runs by total score, confidence, or individual scoring components under the selected objective profile.
 - The point-cloud overlay uses a compact `shown / total pts` readout to avoid small-window layout jitter when visible point counts update.
 - Telemetry saves on Stop, Reset, or completion. Pause/Continue keeps the same run open. Formation, communication, scan-density, and performance changes are live-tunable and logged; terrain/AOI/swarm-size changes save the previous run and clear the map first.

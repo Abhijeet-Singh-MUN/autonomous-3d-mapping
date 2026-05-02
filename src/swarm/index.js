@@ -6,10 +6,17 @@ export {
   computeDerivedControls,
   DEFAULT_SWARM_EVALUATION_PROFILE,
   DEFAULT_SWARM_BEHAVIOR_PROFILE,
+  DEFAULT_POLICY_COORDINATES,
+  deriveBehaviorProfile,
+  GREYBOX_POLICY_MODEL,
+  LOW_LEVEL_PARAMETER_REGISTRY,
   normalizeSwarmSignals,
+  normalizePolicyCoordinates,
   normalizeWeights,
   OPTIMIZER_PARAMETER_REGISTRY,
   PARAMETER_DEPENDENCY_GRAPH,
+  POLICY_COORDINATE_REGISTRY,
+  POLICY_COUPLINGS,
   roleCountTargets,
   scoreSwarmRun
 } from './behavior-profile.js';

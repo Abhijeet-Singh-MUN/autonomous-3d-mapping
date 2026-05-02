@@ -1,3 +1,5 @@
+import { DEFAULT_POLICY_COORDINATES, GREYBOX_POLICY_MODEL } from './behavior-profile.js';
+
 const DB_NAME = 'autonomous-terrain-swarm-telemetry';
 const STORE_NAME = 'runs';
 const DB_VERSION = 1;
@@ -14,7 +16,12 @@ export class SwarmRunTelemetry {
   startRun({ scenario, behaviorProfile, startedAtMs = performance.now() }) {
     this.currentRun = {
       id: `swarm-run-${new Date().toISOString()}-${Math.random().toString(36).slice(2, 8)}`,
-      schemaVersion: 2,
+      schemaVersion: 3,
+      modelFamily: behaviorProfile?.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+      modelVersion: behaviorProfile?.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+      policyCoordinates: { ...(behaviorProfile?.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      effectivePolicyCoordinates: { ...(behaviorProfile?.effectivePolicyCoordinates ?? behaviorProfile?.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      derivedProfileSummary: { ...(behaviorProfile?.derivedProfileSummary ?? {}) },
       status: 'running',
       startedAt: new Date().toISOString(),
       startedAtMs,
@@ -249,7 +256,7 @@ export class SwarmRunTelemetry {
     }
   }
 
-  async listRuns({ limit = 50 } = {}) {
+  async listRuns({ limit = 50, modelFamily = null } = {}) {
     try {
       const db = await this.openDb();
       const runs = await new Promise((resolve, reject) => {
@@ -259,6 +266,7 @@ export class SwarmRunTelemetry {
         request.onerror = () => reject(request.error);
       });
       return runs
+        .filter((run) => !modelFamily || telemetryRunModelFamily(run) === modelFamily)
         .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
         .slice(0, limit);
     } catch (error) {
@@ -267,8 +275,8 @@ export class SwarmRunTelemetry {
     }
   }
 
-  async exportRuns() {
-    return this.listRuns({ limit: Number.MAX_SAFE_INTEGER });
+  async exportRuns({ modelFamily = null } = {}) {
+    return this.listRuns({ limit: Number.MAX_SAFE_INTEGER, modelFamily });
   }
 
   openDb() {
@@ -289,6 +297,10 @@ export class SwarmRunTelemetry {
     }
     return this.dbPromise;
   }
+}
+
+function telemetryRunModelFamily(run) {
+  return run?.modelFamily ?? run?.behaviorProfile?.modelFamily ?? null;
 }
 
 function runningAverage(previousAverage, nextValue, previousCount) {

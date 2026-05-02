@@ -68,6 +68,54 @@ Direction change: optimizers are treated as profile-tuning tools, not direct rea
 
 ## Mathematical Model
 
+### Grey-Box Policy Coordinates
+
+Current model family:
+
+```text
+modelFamily = greybox-policy-v1
+modelVersion = greybox-policy-v1.0
+```
+
+The optimizer-facing search space is now intentionally small:
+
+```text
+psi = {
+  coverage_area: 0.35,
+  aoi_detail: 0.30,
+  risk_safety: 0.20,
+  resource_efficiency: 0.15
+}
+
+sum(psi_i) = 1
+0 <= psi_i <= 1
+```
+
+This does not remove the low-level parameters. It changes their role. Behavior gains, role shares, task weights, sensing multipliers, network thresholds, formation spread, and soft-constraint gains remain active in the controller, but most are now derived adaptive values under `src/swarm/behavior-profile.js`.
+
+The hierarchy is:
+
+```text
+policy coordinates psi
+  -> documented structural coupling coefficients k
+  -> derived behavior profile
+  -> live behavior weights and derived controls
+  -> swarm actions
+```
+
+The first coupling model is hand-authored, bounded, and monotonic:
+
+```text
+low_level_param =
+  base
+  + k_coverage * psi.coverage_area
+  + k_aoi      * psi.aoi_detail
+  + k_risk     * psi.risk_safety
+  + k_energy   * psi.resource_efficiency
+```
+
+The initial `k` values are engineering priors, not learned truth. Later calibration can fit or adjust selected `k` coefficients from small simulation batches instead of exposing every low-level constant to the optimizer.
+
 Let:
 
 ```text
@@ -155,9 +203,27 @@ Potential objective profiles:
 - dense reconstruction;
 - compute efficiency.
 
-Optimization should tune `theta`, the parameter profile. It should not directly force real-time actions. The runtime behavior function still responds to local state.
+Optimization should tune `theta` or the smaller `psi` policy-coordinate profile. It should not directly force real-time actions. The runtime behavior function still responds to local state.
 
-The current optimizer-facing parameter set is intentionally small. `OPTIMIZER_PARAMETER_REGISTRY` exposes only high-impact gains and thresholds at first, such as AOI/frontier/relay/verify/avoidance gains, weak-network relay share, AOI verifier share, weak-health threshold, AOI focus radius, and task continuity bias. This avoids an underdetermined search where many parameter combinations can look equally good against too few metrics.
+For `greybox-policy-v1`, the scalar display score is framed as distance from an ideal Pareto vector:
+
+```text
+pareto = {
+  coverage_area,
+  aoi_detail,
+  risk_safety,
+  resource_efficiency
+}
+
+loss = sum_i psi_i * abs(1 - pareto_i)
+score = 1 - loss
+```
+
+The run record stores both the Pareto vector and the scalar score/loss. This lets the UI sort runs while preserving why a run was good or bad. The older named score components still exist as diagnostics and can be reweighted for specific research questions.
+
+Telemetry is namespaced by model family. New runs save `greybox-policy-v1` and `greybox-policy-v1.0`; the telemetry panel defaults to compatible runs only. Older IndexedDB records remain stored but do not pollute new-model analysis unless a future UI explicitly opts into cross-family comparison.
+
+The current optimizer-facing parameter set is intentionally small. `OPTIMIZER_PARAMETER_REGISTRY` now exposes only the four policy coordinates. `LOW_LEVEL_PARAMETER_REGISTRY` documents the derived low-level parameters and their coupling bounds, but those are not direct optimizer knobs in this model family. This avoids an underdetermined search where many parameter combinations can look equally good against too few metrics.
 
 Temporal metrics are now part of the evaluation direction. Each run still has end-of-run aggregates, but sampled rates capture the curve of behavior over time:
 
@@ -247,7 +313,7 @@ The fourth implementation step adds live algorithm visibility and objective scor
 
 The fifth implementation step adds `src/swarm/resource-model.js` as a physics-adjacent accounting layer. It estimates hover, motion, sensor, compute, communication, total energy, and battery remaining from explicit placeholder parameters. This improves the telemetry schema now while keeping the values clearly marked as uncalibrated until a sourced hardware pass replaces the defaults.
 
-The sixth implementation step adds temporal evaluation. `src/swarm/run-telemetry.js` now stores per-sample delta/rate metrics and a per-run temporal summary. `src/swarm/behavior-profile.js` now centralizes evaluation normalizers, validity thresholds, and the first small optimizer parameter registry. Scoring now blends final totals with curve-derived measures such as AOI hit rate after contact, new voxel rate, network fragmentation duration, energy/compute rate, and behavior-weight smoothness.
+The sixth implementation step adds temporal evaluation. `src/swarm/run-telemetry.js` now stores per-sample delta/rate metrics and a per-run temporal summary. `src/swarm/behavior-profile.js` now centralizes evaluation normalizers, validity thresholds, and the first optimizer parameter registry, which later evolved into the four-coordinate grey-box policy registry. Scoring now blends final totals with curve-derived measures such as AOI hit rate after contact, new voxel rate, network fragmentation duration, energy/compute rate, and behavior-weight smoothness.
 
 The seventh implementation step adds soft constraint signals into the behavior mixture. AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure now appear in normalized signals. They can raise avoidance and efficiency pressure, expand formation spacing slightly under risk, reduce movement freedom under risk, and contribute to a `constraintSafety` score through temporal risk exposure.
 
@@ -256,3 +322,5 @@ The eighth implementation step adds lightweight LiDAR footprint coverage metrics
 The ninth implementation step feeds footprint redundancy back into topology. High inter-drone footprint overlap raises area-spread pressure, expanding formation radius and slightly increasing vertical separation. Low footprint resolution creates detail-tightening pressure that can partially counteract spreading. This makes area coverage and scan resolution competing influences on swarm spacing rather than passive after-run metrics.
 
 Runtime sensor-footprint splatting was tested and removed from the live swarm loop. The current point cloud is raw LiDAR voxel evidence only in `sim.voxelMap`; 9-neighbor/footprint splats are deferred to a future post-scan reconstruction step after Stop/completion/export so synthetic density does not compete with raycasting, control updates, telemetry, and rendering.
+
+The tenth implementation step is the grey-box policy-coordinate refactor. The model family is `greybox-policy-v1`; the model version is `greybox-policy-v1.0`. The optimizer-facing surface is now `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`, while low-level controller parameters are derived through documented `k` coupling coefficients. Telemetry, scoring, exports, and the Algorithm panel now carry the model namespace, policy coordinates, derived profile summary, Pareto vector, scalar score, and scalar loss.
