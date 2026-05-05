@@ -62,6 +62,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - Swarm Behavior Kernel V1 is active: roles rebalance among scouts, mappers, relays, and verifiers based on communication health, frontier pressure, terrain class, and AOI presence.
 - `src/swarm/behavior-profile.js` is now the first central parameter registry for behavior weights, role shares, task scoring, movement, sensing, network, relay, formation, and objective profiles.
 - The active behavior model is a grey-box policy-coordinate hierarchy: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency` derive the lower-level behavior profile through documented coupling coefficients.
+- The four policy coordinates are exposed as mission-control sliders; values are normalized before the active behavior profile is derived.
 - The controller computes normalized signals, behavior weights, derived controls, and a dependency graph; runtime motion, sensing focus, network compliance, and formation spread consume those derived controls.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.

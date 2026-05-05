@@ -15,6 +15,7 @@ import {
   FORMATION_MODES,
   GREYBOX_POLICY_MODEL,
   estimateSwarmResourceUse,
+  normalizePolicyCoordinates,
   scoreSwarmRun,
   SwarmController,
   SwarmRunTelemetry
@@ -67,6 +68,14 @@ const els = {
   swarmScanDensity: document.querySelector('#swarmScanDensity'),
   performanceBudget: document.querySelector('#performanceBudget'),
   objectiveProfile: document.querySelector('#objectiveProfile'),
+  policyCoverageArea: document.querySelector('#policyCoverageArea'),
+  policyAoiDetail: document.querySelector('#policyAoiDetail'),
+  policyRiskSafety: document.querySelector('#policyRiskSafety'),
+  policyResourceEfficiency: document.querySelector('#policyResourceEfficiency'),
+  policyCoverageAreaValue: document.querySelector('#policyCoverageAreaValue'),
+  policyAoiDetailValue: document.querySelector('#policyAoiDetailValue'),
+  policyRiskSafetyValue: document.querySelector('#policyRiskSafetyValue'),
+  policyResourceEfficiencyValue: document.querySelector('#policyResourceEfficiencyValue'),
   visiblePointBudget: document.querySelector('#visiblePointBudget'),
   renderScaleBudget: document.querySelector('#renderScaleBudget'),
   terrainWidth: document.querySelector('#terrainWidth'),
@@ -233,6 +242,7 @@ setupUI();
 createPointCloud();
 applySensorPreset(false);
 applySwarmScanDensityPreset();
+syncPolicyCoordinateOutputs();
 regenerateEnvironment(true);
 resetMission(false, true);
 logMessage('Terrain swarm sandbox ready. Drones map the scene from LiDAR observations and maintain reliable neighbor links.');
@@ -556,6 +566,23 @@ function setupUI() {
     applyObjectiveProfileChange();
     refreshStatus();
     refreshTelemetryPanel();
+  });
+
+  [
+    els.policyCoverageArea,
+    els.policyAoiDetail,
+    els.policyRiskSafety,
+    els.policyResourceEfficiency
+  ].forEach((input) => {
+    input.addEventListener('input', () => {
+      syncPolicyCoordinateOutputs();
+      renderAlgorithmPanel();
+    });
+    input.addEventListener('change', () => {
+      applyPolicyCoordinateChange(input.id);
+      refreshStatus();
+      refreshTelemetryPanel();
+    });
   });
 
   [els.missionMode, els.swarmSize, els.environmentMode, els.aoiPreset].forEach((input) => {
@@ -3646,16 +3673,47 @@ function readSwarmConfig() {
 
 function activeBehaviorProfile() {
   const objectiveKey = els.objectiveProfile?.value ?? DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives.default;
+  const policyCoordinates = readPolicyCoordinates();
   return {
     ...DEFAULT_SWARM_BEHAVIOR_PROFILE,
     modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
     modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
-    policyCoordinates: { ...DEFAULT_POLICY_COORDINATES },
+    policyCoordinates,
     objectives: {
       ...DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives,
       default: objectiveKey
     }
   };
+}
+
+function readPolicyCoordinates() {
+  return normalizePolicyCoordinates({
+    coverage_area: readPolicyCoordinateValue(els.policyCoverageArea, DEFAULT_POLICY_COORDINATES.coverage_area),
+    aoi_detail: readPolicyCoordinateValue(els.policyAoiDetail, DEFAULT_POLICY_COORDINATES.aoi_detail),
+    risk_safety: readPolicyCoordinateValue(els.policyRiskSafety, DEFAULT_POLICY_COORDINATES.risk_safety),
+    resource_efficiency: readPolicyCoordinateValue(els.policyResourceEfficiency, DEFAULT_POLICY_COORDINATES.resource_efficiency)
+  });
+}
+
+function readPolicyCoordinateValue(input, fallback) {
+  const value = input ? readNumber(input) : fallback;
+  return Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
+}
+
+function syncPolicyCoordinateOutputs() {
+  const policy = readPolicyCoordinates();
+  const outputPairs = [
+    [els.policyCoverageAreaValue, policy.coverage_area],
+    [els.policyAoiDetailValue, policy.aoi_detail],
+    [els.policyRiskSafetyValue, policy.risk_safety],
+    [els.policyResourceEfficiencyValue, policy.resource_efficiency]
+  ];
+  outputPairs.forEach(([output, value]) => {
+    if (output) {
+      output.value = `${Math.round(value * 100)}%`;
+      output.textContent = `${Math.round(value * 100)}%`;
+    }
+  });
 }
 
 function applyObjectiveProfileChange() {
@@ -3665,6 +3723,16 @@ function applyObjectiveProfileChange() {
   }
   noteTelemetryControlChange('objective-profile');
   logMessage(`Objective profile set to ${profile.objectives.profiles[profile.objectives.default]?.label ?? profile.objectives.default}.`);
+}
+
+function applyPolicyCoordinateChange(controlId) {
+  syncPolicyCoordinateOutputs();
+  const profile = activeBehaviorProfile();
+  if (sim.swarmController) {
+    sim.swarmController.setBehaviorProfile(profile);
+  }
+  noteTelemetryControlChange(controlId ?? 'policy-coordinates');
+  logMessage(`Policy coordinates updated: coverage ${formatScore(profile.policyCoordinates.coverage_area)}, AOI ${formatScore(profile.policyCoordinates.aoi_detail)}, safety ${formatScore(profile.policyCoordinates.risk_safety)}, resource ${formatScore(profile.policyCoordinates.resource_efficiency)}.`);
 }
 
 function isSwarmMode() {
