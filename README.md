@@ -106,6 +106,7 @@ Swarm algorithm direction:
 - The current model family is `greybox-policy-v1` / `greybox-policy-v1.0`.
 - Future optimizers now see four interpretable policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
 - The four policy coordinates are exposed as mission-control sliders and normalized before deriving the active behavior profile.
+- `Run Policy Batch` cycles through four starter policy presets on the current scenario and saves each run to grey-box telemetry for quick comparison.
 - Low-level controller parameters still matter, but they are derived from those policy coordinates through documented coupling coefficients instead of being optimized independently.
 - Behavior weights will be computed from normalized terrain, AOI, communication, coverage, and mission-progress signals.
 - The current controller now logs normalized signals and derives bounded controls for formation spread, movement speed, assignment pull, AOI focus, and network compliance from those behavior weights.

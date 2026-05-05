@@ -41,6 +41,7 @@ const els = {
   exportBtn: document.querySelector('#exportBtn'),
   telemetryBtn: document.querySelector('#telemetryBtn'),
   algorithmBtn: document.querySelector('#algorithmBtn'),
+  policyExperimentBtn: document.querySelector('#policyExperimentBtn'),
   telemetryPanel: document.querySelector('#telemetryPanel'),
   telemetryRefreshBtn: document.querySelector('#telemetryRefreshBtn'),
   telemetryExportBtn: document.querySelector('#telemetryExportBtn'),
@@ -72,6 +73,7 @@ const els = {
   policyAoiDetail: document.querySelector('#policyAoiDetail'),
   policyRiskSafety: document.querySelector('#policyRiskSafety'),
   policyResourceEfficiency: document.querySelector('#policyResourceEfficiency'),
+  policyExperimentSeconds: document.querySelector('#policyExperimentSeconds'),
   policyCoverageAreaValue: document.querySelector('#policyCoverageAreaValue'),
   policyAoiDetailValue: document.querySelector('#policyAoiDetailValue'),
   policyRiskSafetyValue: document.querySelector('#policyRiskSafetyValue'),
@@ -219,6 +221,14 @@ const sim = {
       lastY: 0
     }
   },
+  policyExperiment: {
+    active: false,
+    runMs: 35000,
+    currentIndex: 0,
+    waitingForNext: false,
+    currentPreset: null,
+    batchId: null
+  },
   logs: []
 };
 
@@ -234,6 +244,29 @@ const temp = {
   cameraForward: new THREE.Vector3(),
   cameraRight: new THREE.Vector3()
 };
+
+const POLICY_EXPERIMENT_PRESETS = [
+  {
+    id: 'balanced-default',
+    label: 'Balanced default',
+    policyCoordinates: { coverage_area: 0.35, aoi_detail: 0.3, risk_safety: 0.2, resource_efficiency: 0.15 }
+  },
+  {
+    id: 'coverage-heavy',
+    label: 'Coverage heavy',
+    policyCoordinates: { coverage_area: 0.55, aoi_detail: 0.2, risk_safety: 0.15, resource_efficiency: 0.1 }
+  },
+  {
+    id: 'aoi-detail-heavy',
+    label: 'AOI detail heavy',
+    policyCoordinates: { coverage_area: 0.18, aoi_detail: 0.56, risk_safety: 0.16, resource_efficiency: 0.1 }
+  },
+  {
+    id: 'safe-efficient',
+    label: 'Safe efficient',
+    policyCoordinates: { coverage_area: 0.18, aoi_detail: 0.18, risk_safety: 0.34, resource_efficiency: 0.3 }
+  }
+];
 
 const main = createMainScene();
 const cloud = createCloudScene();
@@ -469,6 +502,7 @@ function setupUI() {
   els.exportBtn.addEventListener('click', () => exportPointCloudAsPly());
   els.telemetryBtn.addEventListener('click', () => toggleTelemetryPanel());
   els.algorithmBtn.addEventListener('click', () => toggleAlgorithmPanel());
+  els.policyExperimentBtn.addEventListener('click', () => togglePolicyExperimentBatch());
   els.telemetryRefreshBtn.addEventListener('click', () => refreshTelemetryPanel());
   els.telemetryExportBtn.addEventListener('click', () => exportTelemetryRuns());
   els.telemetrySort.addEventListener('change', () => refreshTelemetryPanel());
@@ -1893,6 +1927,78 @@ function stopMission() {
   logMessage('Mission stopped. Telemetry saved; point cloud remains available for inspection and export.');
 }
 
+function togglePolicyExperimentBatch() {
+  if (sim.policyExperiment.active) {
+    sim.policyExperiment.active = false;
+    sim.policyExperiment.waitingForNext = false;
+    sim.policyExperiment.currentPreset = null;
+    updatePolicyExperimentButton();
+    refreshStatus();
+    logMessage('Policy batch cancelled. Current run remains under manual control.');
+    return;
+  }
+
+  sim.policyExperiment.active = true;
+  sim.policyExperiment.runMs = clamp(readNumber(els.policyExperimentSeconds), 15, 180) * 1000;
+  sim.policyExperiment.currentIndex = 0;
+  sim.policyExperiment.waitingForNext = false;
+  sim.policyExperiment.batchId = `policy-batch-${new Date().toISOString()}`;
+  updatePolicyExperimentButton();
+  refreshStatus();
+  logMessage(`Policy batch started: ${POLICY_EXPERIMENT_PRESETS.length} presets at ${Math.round(sim.policyExperiment.runMs / 1000)}s each.`);
+  runNextPolicyExperimentPreset();
+}
+
+function updatePolicyExperimentButton() {
+  if (!els.policyExperimentBtn) {
+    return;
+  }
+  els.policyExperimentBtn.textContent = sim.policyExperiment.active ? 'Cancel Policy Batch' : 'Run Policy Batch';
+}
+
+function runNextPolicyExperimentPreset() {
+  if (!sim.policyExperiment.active) {
+    return;
+  }
+  if (sim.policyExperiment.currentIndex >= POLICY_EXPERIMENT_PRESETS.length) {
+    sim.policyExperiment.active = false;
+    sim.policyExperiment.waitingForNext = false;
+    sim.policyExperiment.currentPreset = null;
+    updatePolicyExperimentButton();
+    refreshStatus();
+    refreshTelemetryPanel();
+    logMessage('Policy batch complete. Telemetry saved for each preset run.');
+    return;
+  }
+
+  const preset = POLICY_EXPERIMENT_PRESETS[sim.policyExperiment.currentIndex];
+  sim.policyExperiment.currentPreset = {
+    ...preset,
+    index: sim.policyExperiment.currentIndex + 1,
+    total: POLICY_EXPERIMENT_PRESETS.length,
+    runSeconds: Math.round(sim.policyExperiment.runMs / 1000),
+    batchId: sim.policyExperiment.batchId
+  };
+  sim.policyExperiment.waitingForNext = false;
+  resetMission(false, false);
+  applyPolicyCoordinatesToControls(preset.policyCoordinates);
+  applyPolicyCoordinateChange(`policy-experiment:${preset.id}`);
+  startMission();
+  logMessage(`Policy batch ${sim.policyExperiment.currentPreset.index}/${sim.policyExperiment.currentPreset.total}: ${preset.label}.`);
+}
+
+function completeCurrentPolicyExperimentPreset() {
+  if (!sim.policyExperiment.active || sim.policyExperiment.waitingForNext) {
+    return;
+  }
+  sim.policyExperiment.waitingForNext = true;
+  const preset = sim.policyExperiment.currentPreset;
+  stopMission();
+  sim.policyExperiment.currentIndex += 1;
+  logMessage(`Policy batch run saved: ${preset?.label ?? 'preset'}.`);
+  window.setTimeout(() => runNextPolicyExperimentPreset(), 700);
+}
+
 function animate(time) {
   requestAnimationFrame(animate);
 
@@ -2725,6 +2831,13 @@ function updateSwarmPreview(deltaSeconds) {
   sim.swarmSnapshot = sim.swarmController.snapshot();
   renderAlgorithmPanel();
   recordSwarmTelemetrySample(activeAois);
+  if (
+    sim.policyExperiment.active
+    && !sim.policyExperiment.waitingForNext
+    && sim.swarmTelemetryElapsedMs >= sim.policyExperiment.runMs
+  ) {
+    completeCurrentPolicyExperimentPreset();
+  }
   sim.currentPhase = launchProgress < 1 ? 'launch' : 'swarm';
 }
 
@@ -2792,7 +2905,8 @@ function startSwarmTelemetryRun() {
         voxelSize: clamp(readNumber(els.voxelSize), 0.015, 0.2)
       },
       performanceBudget: els.performanceBudget.value,
-      controlSnapshot: captureControlSnapshot()
+      controlSnapshot: captureControlSnapshot(),
+      policyExperiment: sim.policyExperiment.currentPreset ? { ...sim.policyExperiment.currentPreset } : null
     },
     behaviorProfile: {
       version: profile.version,
@@ -3700,6 +3814,22 @@ function readPolicyCoordinateValue(input, fallback) {
   return Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
 }
 
+function applyPolicyCoordinatesToControls(policyCoordinates) {
+  const policy = normalizePolicyCoordinates(policyCoordinates);
+  const pairs = [
+    [els.policyCoverageArea, policy.coverage_area],
+    [els.policyAoiDetail, policy.aoi_detail],
+    [els.policyRiskSafety, policy.risk_safety],
+    [els.policyResourceEfficiency, policy.resource_efficiency]
+  ];
+  pairs.forEach(([input, value]) => {
+    if (input) {
+      input.value = value.toFixed(2);
+    }
+  });
+  syncPolicyCoordinateOutputs();
+}
+
 function syncPolicyCoordinateOutputs() {
   const policy = readPolicyCoordinates();
   const outputPairs = [
@@ -4159,6 +4289,7 @@ function refreshStatus() {
   const coverage = sim.mapper ? Math.round((sim.mapper.knownCount / Math.max(total, 1)) * 100) : 0;
   els.coverageReadout.textContent = `${coverage}%`;
   els.goalReadout.textContent = sim.currentGoal ? `${sim.plannerStats.goalsReached} + active` : `${sim.plannerStats.goalsReached} done`;
+  updatePolicyExperimentButton();
   renderAlgorithmPanel();
 }
 

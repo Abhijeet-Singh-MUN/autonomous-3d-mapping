@@ -57,6 +57,7 @@
             <button id="exportBtn">Export PLY</button>
             <button id="telemetryBtn">Telemetry</button>
             <button id="algorithmBtn">Algorithm</button>
+            <button id="policyExperimentBtn">Run Policy Batch</button>
           </div>
 
           <div class="control-grid">
@@ -188,6 +189,10 @@
             <label>
               <span>Policy resource <output id="policyResourceEfficiencyValue">15%</output></span>
               <input id="policyResourceEfficiency" type="range" min="0" max="1" step="0.01" value="0.15" />
+            </label>
+            <label>
+              <span>Policy batch seconds</span>
+              <input id="policyExperimentSeconds" type="number" min="15" max="180" step="5" value="35" />
             </label>
             <label>
               <span>Visible point cap</span>

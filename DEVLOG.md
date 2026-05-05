@@ -11,6 +11,7 @@ This log captures why changes are made, which issues they address, and what they
 - Kept low-level behavior gains, role shares, sensing multipliers, task weights, network thresholds, and footprint controls active as derived parameters instead of deleting them.
 - Added documented `k` coupling coefficients so `psi -> derivedProfile -> controller` is explicit, bounded, and inspectable.
 - Added mission-control sliders for the four policy coordinates so grey-box behavior can be varied without editing code.
+- Added a first policy batch runner that cycles through balanced, coverage-heavy, AOI-detail-heavy, and safe-efficient policy presets for a fixed duration and saves each as normal telemetry.
 - Updated scoring to store a Pareto vector, scalar loss from ideal scores, scalar display score, and the older diagnostic score components.
 - Namespaced telemetry by model family so old IndexedDB runs remain stored but are hidden from the current grey-box analysis/export by default.
 - Updated the Algorithm panel to show model identity, active policy coordinates, and the derived profile summary.
