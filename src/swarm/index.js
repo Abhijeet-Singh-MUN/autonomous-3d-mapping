@@ -4,6 +4,7 @@ export {
   computeBehaviorWeights,
   computeControllerState,
   computeDerivedControls,
+  BASE_RUNTIME_NUDGE_CAP,
   DEFAULT_SWARM_EVALUATION_PROFILE,
   DEFAULT_SWARM_BEHAVIOR_PROFILE,
   DEFAULT_POLICY_COORDINATES,
@@ -17,6 +18,8 @@ export {
   PARAMETER_DEPENDENCY_GRAPH,
   POLICY_COORDINATE_REGISTRY,
   POLICY_COUPLINGS,
+  RUNTIME_NUDGE_PROFILES,
+  runtimeNudgeProfileConfig,
   roleCountTargets,
   scoreSwarmRun
 } from './behavior-profile.js';

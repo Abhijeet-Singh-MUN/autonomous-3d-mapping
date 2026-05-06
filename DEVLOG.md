@@ -6,6 +6,10 @@ This log captures why changes are made, which issues they address, and what they
 
 ### Grey-Box Policy Coordinate Refactor
 
+- Added uniform runtime nudge profiles for grey-box calibration before optimizer work: very low, low, current, strong, and very strong.
+- Expanded the policy batch runner to test 4 policy presets across 5 nudge profiles for 20 fixed-scenario runs.
+- Telemetry now records base psi, runtime nudge, effective psi, delta psi, nudge profile, and avg/max absolute delta psi.
+- Documented adversarial non-combat stressors as allowed future resilience/dataset scenarios while keeping strike, targeting, weapons, military autonomy, and harmful jamming instructions out of scope.
 - Changed the default scan density to `Economy` and performance budget to `Capture` for faster policy-batch simulations.
 - Grouped policy-batch telemetry runs by batch id and displayed preset labels directly in the telemetry panel.
 - Added `greybox-policy-v1` / `greybox-policy-v1.0` as the active swarm algorithm model namespace.

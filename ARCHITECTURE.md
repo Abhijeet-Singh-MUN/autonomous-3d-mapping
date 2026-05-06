@@ -109,6 +109,8 @@ Saved runs are scored with the active objective profile. The current score compo
 
 Telemetry records are compatibility-filtered by model family. New grey-box runs save the model namespace and are shown by default in the telemetry panel; older runs remain in IndexedDB but are hidden from the current comparison view. JSON export filenames include the model family and version so datasets from different algorithm families do not silently mix.
 
+Runtime nudge calibration sits before optimizer work. The browser controller records base policy coordinates, uniform runtime nudges, effective policy coordinates, delta policy coordinates, and nudge profile metadata so policy-batch runs can show whether local adaptation is too weak, useful, or too dominant.
+
 Coverage scoring blends point-voxel growth with footprint area. Footprint metrics approximate how much terrain/object surface the LiDAR sampled at the requested angular resolution and how much of that footprint was redundant overlap. This keeps area coverage measurable without adding derived splat points to the live cloud.
 
 Footprint redundancy also feeds back into formation topology. When multiple drones repeatedly scan overlapping footprint buckets, the controller raises area-spread pressure and expands X/Z formation radius with a smaller vertical-spacing adjustment. When footprint resolution is low, detail pressure can partially tighten spacing so area and resolution behave as opposing factors instead of both being rewarded blindly.
@@ -130,6 +132,7 @@ Telemetry comparison can re-score saved runs under the currently selected object
 
 - Keep the posted single-drone baseline preserved on `main`.
 - Keep `swarm-v1` focused on non-weaponized spatial intelligence and dataset capture.
+- Allow adversarial non-combat stressors only as resilience, safety, and dataset-difficulty scenarios.
 - Every active drone must scan on each scan pass; performance tuning should reduce aggregation/upload/render cost rather than silently skipping drones.
 - LiDAR must raycast against discovered/rendered scene geometry, not analytic terrain shortcuts that give the swarm hidden knowledge.
 - Export should use the full stored cloud, not only visible sampled points.

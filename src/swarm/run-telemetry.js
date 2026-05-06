@@ -19,8 +19,13 @@ export class SwarmRunTelemetry {
       schemaVersion: 3,
       modelFamily: behaviorProfile?.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
       modelVersion: behaviorProfile?.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+      basePolicyCoordinates: { ...(behaviorProfile?.basePolicyCoordinates ?? behaviorProfile?.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
       policyCoordinates: { ...(behaviorProfile?.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      runtimeNudgeProfile: behaviorProfile?.runtimeNudgeProfile ?? 'current',
+      runtimeNudgeScale: behaviorProfile?.runtimeNudgeScale ?? 1,
+      runtimeNudge: { ...(behaviorProfile?.runtimeNudge ?? {}) },
       effectivePolicyCoordinates: { ...(behaviorProfile?.effectivePolicyCoordinates ?? behaviorProfile?.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      deltaPolicyCoordinates: { ...(behaviorProfile?.deltaPolicyCoordinates ?? {}) },
       derivedProfileSummary: { ...(behaviorProfile?.derivedProfileSummary ?? {}) },
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -98,7 +103,9 @@ export class SwarmRunTelemetry {
         networkFragmentedSeconds: 0,
         riskExposureSeconds: 0,
         aoiActiveSeconds: 0,
-        usefulAoiHitRateAfterContact: 0
+        usefulAoiHitRateAfterContact: 0,
+        avgAbsDeltaPsi: 0,
+        maxAbsDeltaPsi: 0
       },
       validity: {
         complete: false,
@@ -223,6 +230,7 @@ export class SwarmRunTelemetry {
     performance.maxScanPassMs = Math.max(performance.maxScanPassMs, scanMs);
     performance.samples += 1;
     this.currentRun.temporalSummary = summarizeTemporalMetrics(this.currentRun.samples);
+    this.currentRun.nudgeSummary = summarizeNudgeMetrics(this.currentRun.samples);
   }
 
   async finishRun({ status = 'complete', endedAtMs = performance.now(), validity = null, notes = [], scoring = null } = {}) {
@@ -235,6 +243,7 @@ export class SwarmRunTelemetry {
     run.elapsedMs = Math.max(run.elapsedMs, endedAtMs - run.startedAtMs);
     run.validity = validity ?? run.validity;
     run.temporalSummary = summarizeTemporalMetrics(run.samples);
+    run.nudgeSummary = summarizeNudgeMetrics(run.samples);
     run.scoring = scoring ?? run.scoring ?? null;
     run.notes.push(...notes);
     this.currentRun = null;
@@ -371,7 +380,26 @@ function summarizeTemporalMetrics(samples = []) {
     avgAoiProximityRisk: weightedAverage(metrics, 'aoiProximityRisk'),
     aoiActiveSeconds: samplesWithAoi.reduce((sum, item) => sum + (item.deltaSeconds ?? 0), 0),
     usefulAoiHitRateAfterContact: weightedAverage(samplesWithAoi, 'aoiHitsPerSecond'),
+    avgAbsDeltaPsi: summarizeNudgeMetrics(samples).avgAbsDeltaPsi,
+    maxAbsDeltaPsi: summarizeNudgeMetrics(samples).maxAbsDeltaPsi,
     durationSeconds: seconds
+  };
+}
+
+function summarizeNudgeMetrics(samples = []) {
+  const deltas = samples
+    .map((sample) => sample.deltaPolicyCoordinates)
+    .filter(Boolean);
+  if (!deltas.length) {
+    return {
+      avgAbsDeltaPsi: 0,
+      maxAbsDeltaPsi: 0
+    };
+  }
+  const absValues = deltas.flatMap((delta) => Object.values(delta).map((value) => Math.abs(Number.isFinite(value) ? value : 0)));
+  return {
+    avgAbsDeltaPsi: absValues.reduce((sum, value) => sum + value, 0) / Math.max(absValues.length, 1),
+    maxAbsDeltaPsi: absValues.reduce((max, value) => Math.max(max, value), 0)
   };
 }
 

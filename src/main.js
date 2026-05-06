@@ -16,6 +16,7 @@ import {
   GREYBOX_POLICY_MODEL,
   estimateSwarmResourceUse,
   normalizePolicyCoordinates,
+  runtimeNudgeProfileConfig,
   scoreSwarmRun,
   SwarmController,
   SwarmRunTelemetry
@@ -73,6 +74,7 @@ const els = {
   policyAoiDetail: document.querySelector('#policyAoiDetail'),
   policyRiskSafety: document.querySelector('#policyRiskSafety'),
   policyResourceEfficiency: document.querySelector('#policyResourceEfficiency'),
+  runtimeNudgeProfile: document.querySelector('#runtimeNudgeProfile'),
   policyExperimentSeconds: document.querySelector('#policyExperimentSeconds'),
   policyCoverageAreaValue: document.querySelector('#policyCoverageAreaValue'),
   policyAoiDetailValue: document.querySelector('#policyAoiDetailValue'),
@@ -225,6 +227,7 @@ const sim = {
     active: false,
     runMs: 35000,
     currentIndex: 0,
+    runPlan: [],
     waitingForNext: false,
     currentPreset: null,
     batchId: null
@@ -267,6 +270,8 @@ const POLICY_EXPERIMENT_PRESETS = [
     policyCoordinates: { coverage_area: 0.18, aoi_detail: 0.18, risk_safety: 0.34, resource_efficiency: 0.3 }
   }
 ];
+
+const POLICY_EXPERIMENT_NUDGE_PROFILES = ['very_low', 'low', 'current', 'strong', 'very_strong'];
 
 const main = createMainScene();
 const cloud = createCloudScene();
@@ -617,6 +622,12 @@ function setupUI() {
       refreshStatus();
       refreshTelemetryPanel();
     });
+  });
+
+  els.runtimeNudgeProfile.addEventListener('change', () => {
+    applyRuntimeNudgeProfileChange();
+    refreshStatus();
+    refreshTelemetryPanel();
   });
 
   [els.missionMode, els.swarmSize, els.environmentMode, els.aoiPreset].forEach((input) => {
@@ -1913,7 +1924,7 @@ function continueMission() {
   logMessage('Mission resumed.');
 }
 
-function stopMission() {
+function stopMission(reason = 'stopped') {
   if (!sim.missionStarted || sim.complete) {
     return;
   }
@@ -1921,32 +1932,49 @@ function stopMission() {
   sim.complete = true;
   sim.status = 'complete';
   sim.currentPhase = 'complete';
-  finalizeSwarmTelemetry('stopped');
+  finalizeSwarmTelemetry(reason);
   refreshStatus();
   drawMissionGraph();
-  logMessage('Mission stopped. Telemetry saved; point cloud remains available for inspection and export.');
+  logMessage(reason === 'cancelled_batch'
+    ? 'Policy batch run cancelled and saved with validity flags.'
+    : 'Mission stopped. Telemetry saved; point cloud remains available for inspection and export.');
 }
 
 function togglePolicyExperimentBatch() {
   if (sim.policyExperiment.active) {
+    const preset = sim.policyExperiment.currentPreset ? { ...sim.policyExperiment.currentPreset } : null;
     sim.policyExperiment.active = false;
     sim.policyExperiment.waitingForNext = false;
     sim.policyExperiment.currentPreset = null;
+    sim.policyExperiment.runPlan = [];
     updatePolicyExperimentButton();
+    if (preset && sim.missionStarted && !sim.complete) {
+      stopMission('cancelled_batch');
+    }
     refreshStatus();
-    logMessage('Policy batch cancelled. Current run remains under manual control.');
+    logMessage('Policy batch cancelled. Current run saved with batch_cancelled validity flag.');
     return;
   }
 
   sim.policyExperiment.active = true;
   sim.policyExperiment.runMs = clamp(readNumber(els.policyExperimentSeconds), 15, 180) * 1000;
   sim.policyExperiment.currentIndex = 0;
+  sim.policyExperiment.runPlan = buildPolicyExperimentRunPlan();
   sim.policyExperiment.waitingForNext = false;
   sim.policyExperiment.batchId = `policy-batch-${new Date().toISOString()}`;
   updatePolicyExperimentButton();
   refreshStatus();
-  logMessage(`Policy batch started: ${POLICY_EXPERIMENT_PRESETS.length} presets at ${Math.round(sim.policyExperiment.runMs / 1000)}s each.`);
+  logMessage(`Policy batch started: ${sim.policyExperiment.runPlan.length} runs at ${Math.round(sim.policyExperiment.runMs / 1000)}s each.`);
   runNextPolicyExperimentPreset();
+}
+
+function buildPolicyExperimentRunPlan() {
+  return POLICY_EXPERIMENT_PRESETS.flatMap((preset) => POLICY_EXPERIMENT_NUDGE_PROFILES.map((nudgeProfile) => ({
+    ...preset,
+    nudgeProfile,
+    nudgeProfileLabel: runtimeNudgeProfileConfig(nudgeProfile).label,
+    nudgeScale: runtimeNudgeProfileConfig(nudgeProfile).scale
+  })));
 }
 
 function updatePolicyExperimentButton() {
@@ -1960,10 +1988,11 @@ function runNextPolicyExperimentPreset() {
   if (!sim.policyExperiment.active) {
     return;
   }
-  if (sim.policyExperiment.currentIndex >= POLICY_EXPERIMENT_PRESETS.length) {
+  if (sim.policyExperiment.currentIndex >= sim.policyExperiment.runPlan.length) {
     sim.policyExperiment.active = false;
     sim.policyExperiment.waitingForNext = false;
     sim.policyExperiment.currentPreset = null;
+    sim.policyExperiment.runPlan = [];
     updatePolicyExperimentButton();
     refreshStatus();
     refreshTelemetryPanel();
@@ -1971,20 +2000,22 @@ function runNextPolicyExperimentPreset() {
     return;
   }
 
-  const preset = POLICY_EXPERIMENT_PRESETS[sim.policyExperiment.currentIndex];
+  const preset = sim.policyExperiment.runPlan[sim.policyExperiment.currentIndex];
   sim.policyExperiment.currentPreset = {
     ...preset,
     index: sim.policyExperiment.currentIndex + 1,
-    total: POLICY_EXPERIMENT_PRESETS.length,
+    total: sim.policyExperiment.runPlan.length,
     runSeconds: Math.round(sim.policyExperiment.runMs / 1000),
     batchId: sim.policyExperiment.batchId
   };
   sim.policyExperiment.waitingForNext = false;
   resetMission(false, false);
   applyPolicyCoordinatesToControls(preset.policyCoordinates);
+  els.runtimeNudgeProfile.value = preset.nudgeProfile;
+  applyRuntimeNudgeProfileChange(`policy-experiment-nudge:${preset.nudgeProfile}`);
   applyPolicyCoordinateChange(`policy-experiment:${preset.id}`);
   startMission();
-  logMessage(`Policy batch ${sim.policyExperiment.currentPreset.index}/${sim.policyExperiment.currentPreset.total}: ${preset.label}.`);
+  logMessage(`Policy batch ${sim.policyExperiment.currentPreset.index}/${sim.policyExperiment.currentPreset.total}: ${preset.label}, ${preset.nudgeProfileLabel} nudge.`);
 }
 
 function completeCurrentPolicyExperimentPreset() {
@@ -2913,8 +2944,13 @@ function startSwarmTelemetryRun() {
       modelFamily: profile.modelFamily,
       modelVersion: profile.modelVersion,
       objective: profile.objectives?.default,
+      basePolicyCoordinates: { ...(profile.basePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
       policyCoordinates: { ...(profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      runtimeNudgeProfile: profile.runtimeNudgeProfile,
+      runtimeNudgeScale: profile.runtimeNudgeScale,
+      runtimeNudge: { ...(profile.runtimeNudge ?? {}) },
       effectivePolicyCoordinates: { ...(profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+      deltaPolicyCoordinates: { ...(profile.deltaPolicyCoordinates ?? {}) },
       derivedProfileSummary: { ...(profile.derivedProfileSummary ?? {}) }
     }
   });
@@ -2969,8 +3005,13 @@ function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
     derivedControls: sim.swarmSnapshot?.metrics?.derivedControls ?? null,
     modelFamily: sim.swarmSnapshot?.metrics?.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
     modelVersion: sim.swarmSnapshot?.metrics?.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    basePolicyCoordinates: sim.swarmSnapshot?.metrics?.basePolicyCoordinates ?? swarmBehaviorProfile().basePolicyCoordinates,
     policyCoordinates: sim.swarmSnapshot?.metrics?.policyCoordinates ?? swarmBehaviorProfile().policyCoordinates,
+    runtimeNudgeProfile: sim.swarmSnapshot?.metrics?.runtimeNudgeProfile ?? swarmBehaviorProfile().runtimeNudgeProfile,
+    runtimeNudgeScale: sim.swarmSnapshot?.metrics?.runtimeNudgeScale ?? swarmBehaviorProfile().runtimeNudgeScale,
+    runtimeNudge: sim.swarmSnapshot?.metrics?.runtimeNudge ?? swarmBehaviorProfile().runtimeNudge,
     effectivePolicyCoordinates: sim.swarmSnapshot?.metrics?.effectivePolicyCoordinates ?? swarmBehaviorProfile().effectivePolicyCoordinates,
+    deltaPolicyCoordinates: sim.swarmSnapshot?.metrics?.deltaPolicyCoordinates ?? swarmBehaviorProfile().deltaPolicyCoordinates,
     derivedProfileSummary: sim.swarmSnapshot?.metrics?.derivedProfileSummary ?? swarmBehaviorProfile().derivedProfileSummary,
     behaviorProfileVersion: sim.swarmSnapshot?.metrics?.behaviorProfileVersion ?? null,
     communicationHealth: sim.swarmSnapshot?.metrics?.communicationHealth ?? 1,
@@ -3024,6 +3065,9 @@ function evaluateSwarmRunValidity(reason) {
   const minAoiDwellMs = run?.aoi.selectedCount ? validity.minAoiDwellMs : 0;
   const minAoiHits = run?.aoi.selectedCount ? validity.minAoiHits : 0;
 
+  if (reason === 'cancelled_batch') {
+    flags.push('batch_cancelled');
+  }
   if (reason !== 'complete' && elapsedMs < validity.minRunMs) {
     flags.push('insufficient_scan_time');
   }
@@ -3793,6 +3837,8 @@ function activeBehaviorProfile() {
     modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
     modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
     policyCoordinates,
+    runtimeNudgeProfile: els.runtimeNudgeProfile?.value ?? 'current',
+    runtimeNudgeScale: runtimeNudgeProfileConfig(els.runtimeNudgeProfile?.value ?? 'current').scale,
     objectives: {
       ...DEFAULT_SWARM_BEHAVIOR_PROFILE.objectives,
       default: objectiveKey
@@ -3863,6 +3909,15 @@ function applyPolicyCoordinateChange(controlId) {
   }
   noteTelemetryControlChange(controlId ?? 'policy-coordinates');
   logMessage(`Policy coordinates updated: coverage ${formatScore(profile.policyCoordinates.coverage_area)}, AOI ${formatScore(profile.policyCoordinates.aoi_detail)}, safety ${formatScore(profile.policyCoordinates.risk_safety)}, resource ${formatScore(profile.policyCoordinates.resource_efficiency)}.`);
+}
+
+function applyRuntimeNudgeProfileChange(controlId = 'runtime-nudge-profile') {
+  const profile = activeBehaviorProfile();
+  if (sim.swarmController) {
+    sim.swarmController.setBehaviorProfile(profile);
+  }
+  noteTelemetryControlChange(controlId);
+  logMessage(`Runtime nudge profile set to ${runtimeNudgeProfileConfig(profile.runtimeNudgeProfile).label} (${profile.runtimeNudgeScale.toFixed(2)}x).`);
 }
 
 function isSwarmMode() {
@@ -4338,7 +4393,10 @@ function renderAlgorithmPanel() {
   renderMetricList(els.algorithmWeights, metrics.behaviorWeights ?? {}, { percent: true, sort: true });
   renderMetricList(els.algorithmSignals, metrics.normalizedSignals ?? {}, { percent: true, maxRows: 9 });
   renderMetricList(els.algorithmControls, {
-    ...(metrics.policyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES),
+    ...prefixMetricKeys('basePsi', metrics.basePolicyCoordinates ?? profile.basePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES),
+    ...prefixMetricKeys('nudge', metrics.runtimeNudge ?? profile.runtimeNudge ?? {}),
+    ...prefixMetricKeys('effectivePsi', metrics.effectivePolicyCoordinates ?? profile.effectivePolicyCoordinates ?? {}),
+    ...prefixMetricKeys('deltaPsi', metrics.deltaPolicyCoordinates ?? profile.deltaPolicyCoordinates ?? {}),
     ...flattenAlgorithmControls(metrics.derivedProfileSummary ?? profile.derivedProfileSummary ?? {}),
     ...flattenAlgorithmControls(metrics.derivedControls ?? {})
   }, { maxRows: 16 });
@@ -4346,11 +4404,17 @@ function renderAlgorithmPanel() {
   renderMetricList(els.algorithmObjective, {
     modelFamily: profile.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
     modelVersion: profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    nudgeProfile: profile.runtimeNudgeProfile ?? 'current',
+    nudgeScale: profile.runtimeNudgeScale ?? 1,
     objective: objective?.label ?? objectiveKey,
     profile: profile.version,
     formation: metrics.formationMode ?? els.swarmFormation.value,
     adaptiveK: metrics.adaptiveNeighborTarget ?? readNumber(els.communicationNeighbors)
   });
+}
+
+function prefixMetricKeys(prefix, values) {
+  return Object.fromEntries(Object.entries(values ?? {}).map(([key, value]) => [`${prefix}.${key}`, value]));
 }
 
 function flattenAlgorithmControls(controls) {
@@ -4492,9 +4556,10 @@ function renderTelemetryRunCard(run) {
     const temporal = scoring.temporalMeasures ?? {};
     return `
       <div class="telemetry-run">
-        <strong>${escapeHtml(experiment ? `${experiment.index}/${experiment.total} ${experiment.label}` : run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
+        <strong>${escapeHtml(experiment ? `${experiment.index}/${experiment.total} ${experiment.label} / ${experiment.nudgeProfileLabel}` : run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
         <span>${(run.totals?.rawHits ?? 0).toLocaleString()} raw hits, ${(run.totals?.pointVoxels ?? 0).toLocaleString()} point voxels, ${(run.totals?.focusedHits ?? 0).toLocaleString()} focused, k${run.samples?.at?.(-1)?.adaptiveNeighborTarget ?? run.network?.avgAdaptiveNeighborTarget?.toFixed?.(1) ?? '--'}</span>
         <span>Pareto coverage ${formatScore(pareto.coverage_area)}, AOI detail ${formatScore(pareto.aoi_detail)}, safety ${formatScore(pareto.risk_safety)}, resource ${formatScore(pareto.resource_efficiency)}</span>
+        <span>Nudge ${escapeHtml(run.runtimeNudgeProfile ?? run.behaviorProfile?.runtimeNudgeProfile ?? '--')} (${formatMetricValue(run.runtimeNudgeScale ?? run.behaviorProfile?.runtimeNudgeScale ?? 0)}x), avg |delta psi| ${formatMetricValue(run.nudgeSummary?.avgAbsDeltaPsi ?? 0)}, max ${formatMetricValue(run.nudgeSummary?.maxAbsDeltaPsi ?? 0)}</span>
         ${experiment ? `<span>Policy batch ${escapeHtml(experiment.id)} / ${escapeHtml(experiment.batchId)}</span>` : ''}
         <span>AOI ${formatScore(components.aoiQuality)}, coverage ${formatScore(components.coverage)}, network ${formatScore(components.networkResilience)}, compute ${formatScore(components.computeEfficiency)}, energy ${formatScore(components.energyProxy)}, smooth ${formatScore(components.adaptationSmoothness)}, safety ${formatScore(components.constraintSafety)}</span>
         <span>${formatMetricValue(temporal.avgNewPointVoxelsPerSecond ?? 0)} new vox/s, ${formatMetricValue(temporal.avgUniqueFootprintAreaPerSecond ?? 0)} m2/s footprint, ${formatScore(1 - (temporal.avgFootprintRedundancyRatio ?? 0))} non-overlap</span>

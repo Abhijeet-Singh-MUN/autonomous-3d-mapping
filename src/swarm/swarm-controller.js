@@ -46,8 +46,13 @@ export class SwarmController {
       behaviorWeights: computeBehaviorWeights({}, this.behaviorProfile),
       normalizedSignals: {},
       derivedControls: {},
+      basePolicyCoordinates: this.behaviorProfile.basePolicyCoordinates,
       policyCoordinates: this.behaviorProfile.policyCoordinates,
+      runtimeNudgeProfile: this.behaviorProfile.runtimeNudgeProfile,
+      runtimeNudgeScale: this.behaviorProfile.runtimeNudgeScale,
+      runtimeNudge: this.behaviorProfile.runtimeNudge,
       effectivePolicyCoordinates: this.behaviorProfile.effectivePolicyCoordinates,
+      deltaPolicyCoordinates: this.behaviorProfile.deltaPolicyCoordinates,
       derivedProfileSummary: this.behaviorProfile.derivedProfileSummary,
       dependencyGraph: [],
       modelFamily: this.behaviorProfile.modelFamily,
@@ -66,8 +71,13 @@ export class SwarmController {
     this.metrics.behaviorProfileVersion = this.behaviorProfile.version;
     this.metrics.modelFamily = this.behaviorProfile.modelFamily;
     this.metrics.modelVersion = this.behaviorProfile.modelVersion;
+    this.metrics.basePolicyCoordinates = this.behaviorProfile.basePolicyCoordinates;
     this.metrics.policyCoordinates = this.behaviorProfile.policyCoordinates;
+    this.metrics.runtimeNudgeProfile = this.behaviorProfile.runtimeNudgeProfile;
+    this.metrics.runtimeNudgeScale = this.behaviorProfile.runtimeNudgeScale;
+    this.metrics.runtimeNudge = this.behaviorProfile.runtimeNudge;
     this.metrics.effectivePolicyCoordinates = this.behaviorProfile.effectivePolicyCoordinates;
+    this.metrics.deltaPolicyCoordinates = this.behaviorProfile.deltaPolicyCoordinates;
     this.metrics.derivedProfileSummary = this.behaviorProfile.derivedProfileSummary;
   }
 
@@ -189,8 +199,13 @@ export class SwarmController {
       behaviorWeights,
       normalizedSignals,
       derivedControls,
+      basePolicyCoordinates: controllerState.basePolicyCoordinates,
       policyCoordinates: controllerState.policyCoordinates,
+      runtimeNudgeProfile: controllerState.runtimeNudgeProfile,
+      runtimeNudgeScale: controllerState.runtimeNudgeScale,
+      runtimeNudge: controllerState.runtimeNudge,
       effectivePolicyCoordinates: controllerState.effectivePolicyCoordinates,
+      deltaPolicyCoordinates: controllerState.deltaPolicyCoordinates,
       derivedProfileSummary: controllerState.derivedProfileSummary,
       dependencyGraph,
       modelFamily: controllerState.modelFamily,
@@ -293,8 +308,13 @@ export class SwarmController {
         objective: this.behaviorProfile.objectives.default,
         modelFamily: this.behaviorProfile.modelFamily,
         modelVersion: this.behaviorProfile.modelVersion,
+        basePolicyCoordinates: { ...this.behaviorProfile.basePolicyCoordinates },
         policyCoordinates: { ...this.behaviorProfile.policyCoordinates },
+        runtimeNudgeProfile: this.behaviorProfile.runtimeNudgeProfile,
+        runtimeNudgeScale: this.behaviorProfile.runtimeNudgeScale,
+        runtimeNudge: { ...this.behaviorProfile.runtimeNudge },
         effectivePolicyCoordinates: { ...this.behaviorProfile.effectivePolicyCoordinates },
+        deltaPolicyCoordinates: { ...this.behaviorProfile.deltaPolicyCoordinates },
         derivedProfileSummary: { ...this.behaviorProfile.derivedProfileSummary }
       },
       agents: this.agents.map((agent) => agent.snapshot()),

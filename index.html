@@ -191,6 +191,16 @@
               <input id="policyResourceEfficiency" type="range" min="0" max="1" step="0.01" value="0.15" />
             </label>
             <label>
+              <span>Runtime nudge profile</span>
+              <select id="runtimeNudgeProfile">
+                <option value="very_low">Very low 0.5x</option>
+                <option value="low">Low 0.75x</option>
+                <option value="current" selected>Current 1x</option>
+                <option value="strong">Strong 1.25x</option>
+                <option value="very_strong">Very strong 1.5x</option>
+              </select>
+            </label>
+            <label>
               <span>Policy batch seconds</span>
               <input id="policyExperimentSeconds" type="number" min="15" max="180" step="5" value="35" />
             </label>

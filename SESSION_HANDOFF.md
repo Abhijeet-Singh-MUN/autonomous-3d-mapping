@@ -63,7 +63,8 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - `src/swarm/behavior-profile.js` is now the first central parameter registry for behavior weights, role shares, task scoring, movement, sensing, network, relay, formation, and objective profiles.
 - The active behavior model is a grey-box policy-coordinate hierarchy: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency` derive the lower-level behavior profile through documented coupling coefficients.
 - The four policy coordinates are exposed as mission-control sliders; values are normalized before the active behavior profile is derived.
-- `Run Policy Batch` cycles through four starter policy presets on the current scenario, using the configured batch seconds value, and saves each preset as a normal telemetry run with experiment metadata. Telemetry groups policy-batch runs by batch id.
+- Runtime nudge profiles use one uniform base cap across all policy coordinates and are calibrated before optimizer work: very low, low, current, strong, and very strong.
+- `Run Policy Batch` cycles through four starter policy presets across five nudge profiles on the current scenario, using the configured batch seconds value, and saves each preset/profile as a normal telemetry run with experiment metadata. Telemetry groups policy-batch runs by batch id.
 - The controller computes normalized signals, behavior weights, derived controls, and a dependency graph; runtime motion, sensing focus, network compliance, and formation spread consume those derived controls.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.
@@ -74,7 +75,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - LiDAR footprint coverage is now tracked as metrics only: total/unique/redundant footprint area, redundancy ratio, and resolution score. It does not create synthetic point-cloud samples.
 - Inter-drone footprint redundancy now feeds back into topology by expanding formation radius/vertical spacing for area coverage, while low resolution can tighten spacing for detail.
 - `src/swarm/behavior-profile.js` now includes `DEFAULT_SWARM_EVALUATION_PROFILE` for scoring/validity thresholds and `OPTIMIZER_PARAMETER_REGISTRY` for the four policy-coordinate Bayesian-optimization search space.
-- Telemetry records now carry model family/version, policy coordinates, derived profile summaries, Pareto vector scores, scalar loss, and scalar display score. The telemetry panel/export default to `greybox-policy-v1`, leaving old runs stored but hidden from current-model comparisons.
+- Telemetry records now carry model family/version, base policy coordinates, runtime nudge, effective policy coordinates, delta policy coordinates, derived profile summaries, Pareto vector scores, scalar loss, and scalar display score. The telemetry panel/export default to `greybox-policy-v1`, leaving old runs stored but hidden from current-model comparisons.
 - Telemetry can filter to valid runs or AOI scenario and sort saved runs by total score, confidence, or individual scoring components under the selected objective profile.
 - The point-cloud overlay uses a compact `shown / total pts` readout to avoid small-window layout jitter when visible point counts update.
 - Telemetry saves on Stop, Reset, or completion. Pause/Continue keeps the same run open. Formation, communication, scan-density, and performance changes are live-tunable and logged; terrain/AOI/swarm-size changes save the previous run and clear the map first.
@@ -101,7 +102,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - Do not use terrain height math as privileged LiDAR knowledge.
 - Do not collapse the AOI scan back onto the marker center.
 - Do not make export depend on only the visible sampled cloud.
-- Do not add weaponized behavior, targeting logic, jamming, strike mechanics, or military autonomy.
+- Do not add strike behavior, target selection, weapons, military autonomy, or harmful jamming instructions. Adversarial non-combat stressors are allowed for resilience and safety testing.
 
 ## New Session Startup
 

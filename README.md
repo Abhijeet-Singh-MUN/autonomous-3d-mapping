@@ -106,7 +106,8 @@ Swarm algorithm direction:
 - The current model family is `greybox-policy-v1` / `greybox-policy-v1.0`.
 - Future optimizers now see four interpretable policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
 - The four policy coordinates are exposed as mission-control sliders and normalized before deriving the active behavior profile.
-- `Run Policy Batch` cycles through four starter policy presets on the current scenario and saves each run to grey-box telemetry for quick comparison.
+- `Run Policy Batch` cycles through four starter policy presets across five runtime nudge profiles on the current scenario and saves the 20-run batch to grey-box telemetry for quick comparison.
+- Runtime nudge profiles test local adaptation strength with one uniform cap across all policy coordinates: very low, low, current, strong, and very strong.
 - Low-level controller parameters still matter, but they are derived from those policy coordinates through documented coupling coefficients instead of being optimized independently.
 - Behavior weights will be computed from normalized terrain, AOI, communication, coverage, and mission-progress signals.
 - The current controller now logs normalized signals and derives bounded controls for formation spread, movement speed, assignment pull, AOI focus, and network compliance from those behavior weights.
@@ -118,6 +119,7 @@ Swarm algorithm direction:
 - Inter-drone footprint redundancy now feeds back into formation spacing: overlapping LiDAR footprints increase area-spread pressure, while low footprint resolution can tighten spacing for detail.
 - Telemetry can sort saved runs by score, confidence, or subscore, filter to valid runs only, and filter by AOI scenario.
 - Telemetry defaults to the active model family, so old runs remain stored locally but do not mix into grey-box comparison/export by default.
+- Future adversarial non-combat stressors are allowed as safety/resilience scenarios: moving obstacles, deliberate occlusion, degraded commercial comms, GPS/sensor dropouts, emergency landing, high-risk AOI proximity, and cluttered/deceptive environments.
 - `SWARM_ALGORITHM.md` is the detailed design rationale for the math, parameter dependencies, optimization direction, and reasoning history behind this approach.
 
 Formation notes:

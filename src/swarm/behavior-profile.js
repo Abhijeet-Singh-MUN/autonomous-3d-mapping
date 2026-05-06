@@ -21,6 +21,16 @@ export const DEFAULT_POLICY_COORDINATES = {
   resource_efficiency: 0.15
 };
 
+export const BASE_RUNTIME_NUDGE_CAP = 0.1;
+
+export const RUNTIME_NUDGE_PROFILES = {
+  very_low: { key: 'very_low', label: 'Very low', scale: 0.5 },
+  low: { key: 'low', label: 'Low', scale: 0.75 },
+  current: { key: 'current', label: 'Current', scale: 1 },
+  strong: { key: 'strong', label: 'Strong', scale: 1.25 },
+  very_strong: { key: 'very_strong', label: 'Very strong', scale: 1.5 }
+};
+
 export const POLICY_COORDINATE_REGISTRY = [
   { key: 'coverage_area', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.coverage_area, group: 'pareto', reason: 'Biases the derived controller toward broad unique footprint coverage and frontier exploration.' },
   { key: 'aoi_detail', min: 0, max: 1, default: DEFAULT_POLICY_COORDINATES.aoi_detail, group: 'pareto', reason: 'Biases the derived controller toward focused AOI dwell, verification, and tighter sensing.' },
@@ -81,6 +91,8 @@ export const DEFAULT_SWARM_BEHAVIOR_PROFILE = {
   modelFamily: GREYBOX_POLICY_MODEL.modelFamily,
   modelVersion: GREYBOX_POLICY_MODEL.modelVersion,
   policyCoordinates: { ...DEFAULT_POLICY_COORDINATES },
+  runtimeNudgeProfile: 'current',
+  runtimeNudgeScale: RUNTIME_NUDGE_PROFILES.current.scale,
   policyCouplingsVersion: POLICY_COUPLINGS.version,
   roleBalance: {
     weakCommunicationThreshold: 0.72,
@@ -350,6 +362,10 @@ export function normalizePolicyCoordinates(policyCoordinates = DEFAULT_POLICY_CO
   return Object.fromEntries(entries.map(([key, value]) => [key, value / total]));
 }
 
+export function runtimeNudgeProfileConfig(profileKey = 'current') {
+  return RUNTIME_NUDGE_PROFILES[profileKey] ?? RUNTIME_NUDGE_PROFILES.current;
+}
+
 export function deriveBehaviorProfile(
   baseProfile = DEFAULT_SWARM_BEHAVIOR_PROFILE,
   policyCoordinates = baseProfile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
@@ -357,18 +373,35 @@ export function deriveBehaviorProfile(
 ) {
   const psi = normalizePolicyCoordinates(policyCoordinates);
   const derived = cloneBehaviorProfile(baseProfile);
-  const stateNudges = {
-    aoi_detail: clamp01(stateSignals.aoiCount > 0 ? (stateSignals.aoiPressure ?? 1) * 0.08 : 0),
-    risk_safety: clamp01(Math.max(stateSignals.riskPressure ?? 0, stateSignals.networkPressure ?? 0) * 0.08),
-    resource_efficiency: clamp01(Math.max(stateSignals.batteryPressure ?? 0, stateSignals.computePressure ?? 0) * 0.08),
-    coverage_area: clamp01((stateSignals.frontierPressure ?? stateSignals.frontierDensity ?? 0) * 0.06)
+  const nudgeProfile = runtimeNudgeProfileConfig(baseProfile.runtimeNudgeProfile);
+  const runtimeNudgeScale = nudgeProfile.scale;
+  const nudgeCap = BASE_RUNTIME_NUDGE_CAP * runtimeNudgeScale;
+  const computePressure = clamp01(Math.max(
+    stateSignals.computePressure ?? 0,
+    stateSignals.avgFrameMs ? stateSignals.avgFrameMs / 80 : 0,
+    stateSignals.avgScanPassMs ? stateSignals.avgScanPassMs / 160 : 0
+  ));
+  const batteryPressure = stateSignals.batteryPressure ?? (
+    stateSignals.batteryRemainingPct === null || stateSignals.batteryRemainingPct === undefined
+      ? 0
+      : clamp01(1 - stateSignals.batteryRemainingPct)
+  );
+  const runtimeNudge = {
+    coverage_area: clamp01(stateSignals.frontierPressure ?? stateSignals.frontierDensity ?? 0) * nudgeCap,
+    aoi_detail: (stateSignals.aoiCount > 0 ? clamp01(stateSignals.aoiPressure ?? 1) : 0) * nudgeCap,
+    risk_safety: clamp01(Math.max(stateSignals.riskPressure ?? 0, stateSignals.networkPressure ?? 0, stateSignals.aoiProximityRisk ?? 0)) * nudgeCap,
+    resource_efficiency: clamp01(Math.max(batteryPressure, computePressure, stateSignals.missionTimePressure ?? 0)) * nudgeCap
   };
   const effectivePsi = normalizePolicyCoordinates({
-    coverage_area: psi.coverage_area + stateNudges.coverage_area,
-    aoi_detail: psi.aoi_detail + stateNudges.aoi_detail,
-    risk_safety: psi.risk_safety + stateNudges.risk_safety,
-    resource_efficiency: psi.resource_efficiency + stateNudges.resource_efficiency
+    coverage_area: psi.coverage_area + runtimeNudge.coverage_area,
+    aoi_detail: psi.aoi_detail + runtimeNudge.aoi_detail,
+    risk_safety: psi.risk_safety + runtimeNudge.risk_safety,
+    resource_efficiency: psi.resource_efficiency + runtimeNudge.resource_efficiency
   });
+  const deltaPolicyCoordinates = Object.fromEntries(POLICY_COORDINATE_REGISTRY.map(({ key }) => [
+    key,
+    (effectivePsi[key] ?? 0) - (psi[key] ?? 0)
+  ]));
 
   Object.entries(POLICY_COUPLINGS).forEach(([groupKey, group]) => {
     if (!derived[groupKey] || typeof group !== 'object' || Array.isArray(group)) {
@@ -391,7 +424,13 @@ export function deriveBehaviorProfile(
   derived.modelVersion = GREYBOX_POLICY_MODEL.modelVersion;
   derived.version = `${baseProfile.version ?? 'swarm-behavior-profile'}+${GREYBOX_POLICY_MODEL.modelVersion}`;
   derived.policyCoordinates = psi;
+  derived.basePolicyCoordinates = psi;
+  derived.runtimeNudgeProfile = nudgeProfile.key;
+  derived.runtimeNudgeScale = runtimeNudgeScale;
+  derived.runtimeNudgeCap = nudgeCap;
+  derived.runtimeNudge = runtimeNudge;
   derived.effectivePolicyCoordinates = effectivePsi;
+  derived.deltaPolicyCoordinates = deltaPolicyCoordinates;
   derived.policyCouplingsVersion = POLICY_COUPLINGS.version;
   derived.derivedProfileSummary = summarizeDerivedProfile(derived);
   return derived;
@@ -401,7 +440,13 @@ function cloneBehaviorProfile(profile) {
   return {
     ...profile,
     policyCoordinates: { ...(profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+    basePolicyCoordinates: { ...(profile.basePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+    runtimeNudgeProfile: profile.runtimeNudgeProfile ?? 'current',
+    runtimeNudgeScale: profile.runtimeNudgeScale ?? RUNTIME_NUDGE_PROFILES.current.scale,
+    runtimeNudgeCap: profile.runtimeNudgeCap ?? BASE_RUNTIME_NUDGE_CAP,
+    runtimeNudge: { ...(profile.runtimeNudge ?? {}) },
     effectivePolicyCoordinates: { ...(profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES) },
+    deltaPolicyCoordinates: { ...(profile.deltaPolicyCoordinates ?? {}) },
     roleBalance: { ...profile.roleBalance },
     behaviorMixer: { ...profile.behaviorMixer },
     constraints: { ...profile.constraints },
@@ -625,7 +670,12 @@ export function computeControllerState({
     modelFamily: profile.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
     modelVersion: profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
     policyCoordinates: profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+    basePolicyCoordinates: profile.basePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+    runtimeNudgeProfile: profile.runtimeNudgeProfile ?? 'current',
+    runtimeNudgeScale: profile.runtimeNudgeScale ?? RUNTIME_NUDGE_PROFILES.current.scale,
+    runtimeNudge: profile.runtimeNudge ?? {},
     effectivePolicyCoordinates: profile.effectivePolicyCoordinates ?? profile.policyCoordinates ?? DEFAULT_POLICY_COORDINATES,
+    deltaPolicyCoordinates: profile.deltaPolicyCoordinates ?? {},
     derivedProfileSummary: profile.derivedProfileSummary ?? summarizeDerivedProfile(profile),
     objective: profile.objectives.default,
     normalizedSignals,

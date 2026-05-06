@@ -36,6 +36,18 @@ Swarm V1 builds on that system without rewriting the current path planner.
 - Exports:
   - Point-cloud tiles with metadata
   - Mission replay logs with trajectories, roles, formation states, communication graph snapshots, scan events, and AOI events
+- Grey-box calibration:
+  - Four optimizer-facing policy coordinates: coverage area, AOI detail, risk safety, and resource efficiency
+  - Uniform runtime nudge profiles for measuring local adaptation strength before optimizer work
+  - Policy batch runs that vary policy presets and nudge profiles while keeping the scenario fixed
+- Adversarial non-combat stressors:
+  - Moving obstacles
+  - Deliberate occlusion
+  - Degraded commercial communications
+  - GPS/sensor dropouts
+  - Emergency or fast landing behavior
+  - High-risk AOI proximity tasks
+  - Cluttered or deceptive environments
 
 ## Adaptive Formation Concept
 
@@ -105,7 +117,8 @@ Track and display:
 
 ## Non-Goals For V1
 
-- No military strike, jamming, or targeting behavior.
+- No strike behavior, target selection, weapons, military autonomy, or harmful jamming instructions.
+- Adversarial non-combat stressors are allowed only as resilience and safety evaluation scenarios.
 - No advanced planner rewrite.
 - No physically perfect RF/network simulation.
 - No training pipeline for 3D AI models yet.
