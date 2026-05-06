@@ -3538,7 +3538,7 @@ function buildSwarmScanDirections() {
 function swarmScanDensityConfig() {
   switch (els.swarmScanDensity.value) {
     case 'economy':
-      return { horizontal: 6, vertical: 2, writeInputs: true };
+      return { horizontal: 4, vertical: 2, writeInputs: true };
     case 'light':
       return { horizontal: 4, vertical: 4, writeInputs: true };
     case 'dense':
@@ -4452,27 +4452,56 @@ async function refreshTelemetryPanel() {
     return;
   }
 
-  els.telemetryRuns.innerHTML = runs.map((run) => {
+  els.telemetryRuns.innerHTML = renderTelemetryRunGroups(runs);
+}
+
+function renderTelemetryRunGroups(runs) {
+  const groups = [];
+  runs.forEach((run) => {
+    const experiment = run.scenario?.policyExperiment ?? null;
+    const groupKey = experiment?.batchId ?? `single:${run.id}`;
+    let group = groups.find((candidate) => candidate.key === groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        experiment,
+        runs: []
+      };
+      groups.push(group);
+    }
+    group.runs.push(run);
+  });
+
+  return groups.map((group) => {
+    const header = group.experiment
+      ? `<div class="telemetry-run telemetry-run--batch"><strong>${escapeHtml(group.experiment.batchId)}</strong><span>${group.runs.length} / ${group.experiment.total ?? '?'} policy preset run(s), ${group.experiment.runSeconds ?? '?'}s each</span></div>`
+      : '';
+    return `${header}${group.runs.map(renderTelemetryRunCard).join('')}`;
+  }).join('');
+}
+
+function renderTelemetryRunCard(run) {
     const flags = run.validity?.flags?.length ? run.validity.flags.join(', ') : 'valid';
     const aoi = run.scenario?.aoiPreset ?? 'auto';
     const elapsedSeconds = ((run.elapsedMs ?? 0) / 1000).toFixed(1);
     const behavior = run.behaviorProfile?.version ?? 'unknown profile';
+    const experiment = run.scenario?.policyExperiment ?? null;
     const scoring = scoreRunForActiveObjective(run);
     const components = scoring.components ?? {};
     const pareto = scoring.paretoVector ?? {};
     const temporal = scoring.temporalMeasures ?? {};
     return `
       <div class="telemetry-run">
-        <strong>${escapeHtml(run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
+        <strong>${escapeHtml(experiment ? `${experiment.index}/${experiment.total} ${experiment.label}` : run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
         <span>${(run.totals?.rawHits ?? 0).toLocaleString()} raw hits, ${(run.totals?.pointVoxels ?? 0).toLocaleString()} point voxels, ${(run.totals?.focusedHits ?? 0).toLocaleString()} focused, k${run.samples?.at?.(-1)?.adaptiveNeighborTarget ?? run.network?.avgAdaptiveNeighborTarget?.toFixed?.(1) ?? '--'}</span>
         <span>Pareto coverage ${formatScore(pareto.coverage_area)}, AOI detail ${formatScore(pareto.aoi_detail)}, safety ${formatScore(pareto.risk_safety)}, resource ${formatScore(pareto.resource_efficiency)}</span>
+        ${experiment ? `<span>Policy batch ${escapeHtml(experiment.id)} / ${escapeHtml(experiment.batchId)}</span>` : ''}
         <span>AOI ${formatScore(components.aoiQuality)}, coverage ${formatScore(components.coverage)}, network ${formatScore(components.networkResilience)}, compute ${formatScore(components.computeEfficiency)}, energy ${formatScore(components.energyProxy)}, smooth ${formatScore(components.adaptationSmoothness)}, safety ${formatScore(components.constraintSafety)}</span>
         <span>${formatMetricValue(temporal.avgNewPointVoxelsPerSecond ?? 0)} new vox/s, ${formatMetricValue(temporal.avgUniqueFootprintAreaPerSecond ?? 0)} m2/s footprint, ${formatScore(1 - (temporal.avgFootprintRedundancyRatio ?? 0))} non-overlap</span>
         <span>${formatMetricValue(temporal.usefulAoiHitRateAfterContact ?? 0)} AOI hits/s after contact, ${formatMetricValue(temporal.avgBehaviorWeightChangePerSecond ?? 0)} weight-change/s, ${formatMetricValue(temporal.riskExposureSeconds ?? 0)} risk s</span>
         <span>${escapeHtml(flags)} / ${escapeHtml(behavior)}</span>
       </div>
     `;
-  }).join('');
 }
 
 function filterTelemetryRunsByScenario(runs, scenarioFilter) {

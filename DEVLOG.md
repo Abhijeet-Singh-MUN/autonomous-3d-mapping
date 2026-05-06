@@ -6,6 +6,8 @@ This log captures why changes are made, which issues they address, and what they
 
 ### Grey-Box Policy Coordinate Refactor
 
+- Changed the default scan density to `Economy` and performance budget to `Capture` for faster policy-batch simulations.
+- Grouped policy-batch telemetry runs by batch id and displayed preset labels directly in the telemetry panel.
 - Added `greybox-policy-v1` / `greybox-policy-v1.0` as the active swarm algorithm model namespace.
 - Replaced the optimizer-facing low-level parameter registry with four Pareto policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
 - Kept low-level behavior gains, role shares, sensing multipliers, task weights, network thresholds, and footprint controls active as derived parameters instead of deleting them.

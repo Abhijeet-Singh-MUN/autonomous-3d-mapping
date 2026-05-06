@@ -184,7 +184,7 @@ npm run preview
 
 ### LiDAR and point-cloud capture
 
-- `Swarm scan density`: six-level preset dropdown for per-drone scan fan density: economy, light, balanced, dense, survey, and max capture. The default is `Light`; `Custom` is selected automatically when ray counts are edited directly.
+- `Swarm scan density`: six-level preset dropdown for per-drone scan fan density: economy, light, balanced, dense, survey, and max capture. The default is `Economy` for fast policy experiments; `Custom` is selected automatically when ray counts are edited directly.
 - `Per-drone H rays`, `Per-drone V rays`: explicit horizontal and vertical ray counts per drone per scan pass.
 - `Sensor H FOV`, `Sensor V FOV`: control the horizontal and vertical scan cone in degrees.
 - `Sensor range`: caps raycast distance and therefore how far free/occupied voxels can be discovered.

@@ -51,8 +51,8 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - Swarm drones: `24`.
 - K-nearest comms links: `6`.
 - Link dropout: `0`.
-- Scan density: `Light`.
-- Performance budget: `Quality`.
+- Scan density: `Economy`.
+- Performance budget: `Capture`.
 - Visible point cap path supports up to `1,200,000` points in custom mode.
 - AOI color cue: red local Z-depth gradient around object/AOI scale.
 
@@ -63,7 +63,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - `src/swarm/behavior-profile.js` is now the first central parameter registry for behavior weights, role shares, task scoring, movement, sensing, network, relay, formation, and objective profiles.
 - The active behavior model is a grey-box policy-coordinate hierarchy: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency` derive the lower-level behavior profile through documented coupling coefficients.
 - The four policy coordinates are exposed as mission-control sliders; values are normalized before the active behavior profile is derived.
-- `Run Policy Batch` cycles through four starter policy presets on the current scenario, using the configured batch seconds value, and saves each preset as a normal telemetry run with experiment metadata.
+- `Run Policy Batch` cycles through four starter policy presets on the current scenario, using the configured batch seconds value, and saves each preset as a normal telemetry run with experiment metadata. Telemetry groups policy-batch runs by batch id.
 - The controller computes normalized signals, behavior weights, derived controls, and a dependency graph; runtime motion, sensing focus, network compliance, and formation spread consume those derived controls.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.
