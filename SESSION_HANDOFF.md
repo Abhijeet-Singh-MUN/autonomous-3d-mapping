@@ -8,6 +8,7 @@
 - Baseline branch: `main` keeps the posted single-drone room project preserved.
 - Current branch direction: terrain/swarm simulator for adaptive 3D mapping and point-cloud dataset capture.
 - Active swarm algorithm model: `greybox-policy-v1` / `greybox-policy-v1.0`.
+- Research direction summary: `RESEARCH_ROADMAP.md`.
 
 ## Run Commands
 
@@ -65,6 +66,18 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - The four policy coordinates are exposed as mission-control sliders; values are normalized before the active behavior profile is derived.
 - Runtime nudge profiles use one uniform base cap across all policy coordinates and are calibrated before optimizer work: very low, low, current, strong, and very strong.
 - `Run Policy Batch` cycles through four starter policy presets across five nudge profiles on the current scenario, using the configured batch seconds value, and saves each preset/profile as a normal telemetry run with experiment metadata. Telemetry groups policy-batch runs by batch id.
+- `Policy batch mode` selects either the 20-run nudge-calibration sweep or a 4-run Pareto-only comparison that keeps the currently selected nudge profile fixed.
+- The 20-run policy/nudge batch is a nudge-calibration phase. Once a default nudge profile is chosen, later batches should mostly vary the four Pareto policy coordinates.
+- Telemetry batch headers summarize valid/invalid/cancelled counts, average score/loss, best run, lowest loss, and per-preset/per-nudge averages for quick in-sim checks before external analysis.
+- `Dataset workspace` tags telemetry runs and export filenames. Use a new workspace name for new calibration/model/data campaigns; old IndexedDB runs remain available.
+- Saved workspace names are remembered locally, and Telemetry can filter by active workspace, all workspaces, legacy/untagged runs, or a named workspace.
+- Workspace clearing deletes IndexedDB telemetry for one selected workspace only after typing the exact workspace name. It can optionally remove the saved workspace name, but it never clears all workspaces.
+- Telemetry exports support JSON for full nested records and CSV for external analysis/optimizer ingestion.
+- Policy batch seconds default to `120` and accept `30..900`; use fixed time windows for fair comparisons, then empirically decide whether AOI/Pareto runs need `180+`.
+- Do not add auto-duration yet. For the next calibration/data pass, keep the fixed `120s` budget, compare runs within the same AOI scenario, and record cross-AOI distance/position bias as dataset context instead of normalizing it away.
+- Role behavior is still shared-mapping with role bias: every drone contributes raw LiDAR mapping, while mapper/verifier/relay/scout differ through task pull, focused AOI rays, role counts, movement speed, network compliance, and derived controls. Future work should give each role a clearer downstream control surface so Pareto/effective-psi changes produce more distinct expert behavior.
+- Telemetry samples include sparse per-drone trajectory vectors synchronized with the normal sample cadence; CSV exports only aggregate trajectory fields to stay compact.
+- Mission Controls are grouped into collapsible clusters. The hidden A*/Weighted/Greedy planner controls should be kept for future swarm-algorithm comparisons.
 - The controller computes normalized signals, behavior weights, derived controls, and a dependency graph; runtime motion, sensing focus, network compliance, and formation spread consume those derived controls.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.
@@ -90,11 +103,11 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 
 ## Next Milestone Order
 
-1. Stabilize dense/survey performance in the browser-first local simulator.
-2. Keep performance diagnostics visible while tuning.
-3. Extract point-cloud and LiDAR scanning modules once behavior is stable.
-4. Tune Swarm Behavior Kernel V1 visually across adaptive, relay chain, perimeter, and dense AOI scenarios.
-5. Continue documenting changes in `README.md`, `DEVLOG.md`, `ARCHITECTURE.md`, and this handoff file.
+1. Run the fixed-120s nudge calibration and inspect validity/summary/export fields.
+2. Fix mapper/verifier clumping with spatially distributed AOI sectors or lane ownership.
+3. Strengthen role-specific controls so scouts, mappers, relays, and verifiers remain common enough for shared mapping but distinct enough for downstream behavior analysis.
+4. Start Pareto-only batches across repeated seeds/AOI scenarios after nudge calibration.
+5. Continue documenting changes in `README.md`, `DEVLOG.md`, `ARCHITECTURE.md`, `SWARM_ALGORITHM.md`, `RESEARCH_ROADMAP.md`, and this handoff file.
 
 ## Do Not Regress
 

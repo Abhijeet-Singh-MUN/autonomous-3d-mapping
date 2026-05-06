@@ -111,6 +111,14 @@ Telemetry records are compatibility-filtered by model family. New grey-box runs 
 
 Runtime nudge calibration sits before optimizer work. The browser controller records base policy coordinates, uniform runtime nudges, effective policy coordinates, delta policy coordinates, and nudge profile metadata so policy-batch runs can show whether local adaptation is too weak, useful, or too dominant.
 
+The telemetry panel owns only lightweight experiment summaries: valid/cancelled counts, best run, average score/loss, and per-preset/per-nudge Pareto averages. Heavy statistical processing, plots, GP surrogate fitting, and optimizer loops remain outside the browser export path until the schema stabilizes.
+
+Telemetry now records a user-facing dataset workspace name. Browser storage remains IndexedDB, but the workspace name separates calibration campaigns in run metadata and export filenames. JSON export remains the canonical full record; CSV export is the flattened analysis surface for external notebooks and optimizer tooling.
+
+Workspace management is intentionally browser-local in V1. Workspace names live in `localStorage`; run data lives in IndexedDB; exports are still user-triggered downloads. A future file-picker integration can map these logical workspaces to real folders if the browser/runtime supports it.
+
+Workspace clearing is scoped to a single selected workspace and requires exact-name confirmation. The app never exposes a one-click "clear all workspaces" path; invalid and cancelled runs remain stored unless the user clears their workspace.
+
 Coverage scoring blends point-voxel growth with footprint area. Footprint metrics approximate how much terrain/object surface the LiDAR sampled at the requested angular resolution and how much of that footprint was redundant overlap. This keeps area coverage measurable without adding derived splat points to the live cloud.
 
 Footprint redundancy also feeds back into formation topology. When multiple drones repeatedly scan overlapping footprint buckets, the controller raises area-spread pressure and expands X/Z formation radius with a smaller vertical-spacing adjustment. When footprint resolution is low, detail pressure can partially tighten spacing so area and resolution behave as opposing factors instead of both being rewarded blindly.
@@ -118,6 +126,8 @@ Footprint redundancy also feeds back into formation topology. When multiple dron
 `src/swarm/resource-model.js` is the first explicit home for physics-adjacent accounting. It currently estimates hover, motion, sensor, compute, communication, total energy, and battery remaining from placeholder parameters. These values are suitable for schema design and relative smoke testing only; a later calibration pass should replace the placeholder defaults with sourced drone, battery, sensor, and onboard-compute data.
 
 Telemetry comparison can re-score saved runs under the currently selected objective profile, filter by AOI scenario or validity, then sort by total score, confidence, or individual subscores. This keeps raw run data persistent while allowing the evaluation target to change as the research question changes.
+
+Policy batches use fixed time windows as the primary experimental standard. The UI defaults to 120 seconds while allowing 30-900 seconds, so calibration can test whether 120 seconds is enough before using longer AOI/Pareto runs.
 
 ## Extraction Targets
 

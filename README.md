@@ -107,7 +107,14 @@ Swarm algorithm direction:
 - Future optimizers now see four interpretable policy coordinates: `coverage_area`, `aoi_detail`, `risk_safety`, and `resource_efficiency`.
 - The four policy coordinates are exposed as mission-control sliders and normalized before deriving the active behavior profile.
 - `Run Policy Batch` cycles through four starter policy presets across five runtime nudge profiles on the current scenario and saves the 20-run batch to grey-box telemetry for quick comparison.
+- Policy batches use fixed time budgets for fair comparisons. The current default is `120s`; use about `45s` for smoke tests and `180s` only when AOI-heavy runs need more dwell time.
+- Auto-duration is deferred for now. Compare fixed-time runs within each AOI scenario and keep cross-AOI distance/contact/dwell differences visible in telemetry.
 - Runtime nudge profiles test local adaptation strength with one uniform cap across all policy coordinates: very low, low, current, strong, and very strong.
+- The 20-run nudge sweep is a calibration step. After choosing a stable default nudge profile, switch batch mode to Pareto-only so later batches mostly vary the four Pareto policy coordinates.
+- Telemetry batch summaries give quick in-sim sanity checks for best run, average score/loss, valid/cancelled counts, and average Pareto vectors before deeper external analysis.
+- `Dataset workspace` tags new telemetry runs and export filenames so calibration data, Pareto sweeps, and later adversarial datasets can be kept separate without deleting old IndexedDB records.
+- Workspace clearing deletes only telemetry records for one selected workspace after exact-name confirmation; invalid/cancelled runs are otherwise kept and filtered rather than discarded.
+- Telemetry exports support both JSON and CSV. JSON preserves nested run evidence; CSV flattens run-level fields for notebooks, statistics, and future optimizer input.
 - Low-level controller parameters still matter, but they are derived from those policy coordinates through documented coupling coefficients instead of being optimized independently.
 - Behavior weights will be computed from normalized terrain, AOI, communication, coverage, and mission-progress signals.
 - The current controller now logs normalized signals and derives bounded controls for formation spread, movement speed, assignment pull, AOI focus, and network compliance from those behavior weights.
@@ -115,12 +122,16 @@ Swarm algorithm direction:
 - Saved runs are scored with the active objective profile across AOI quality, coverage, network resilience, time efficiency, compute efficiency, energy/path proxy, adaptation smoothness, and constraint safety. Scoring also stores raw measures, temporal measures, normalization targets, and confidence metadata.
 - Telemetry now stores first-pass resource fields for hover, motion, sensor, compute, communication, total energy, and estimated battery remaining. The current values are placeholder simulation estimates until calibrated from sourced platform and sensor data.
 - Telemetry samples now include temporal rate metrics such as new voxels per second, AOI hits per second after contact, energy/compute rate, network fragmentation duration, and behavior-weight change rate. Run scores can therefore use curve-derived behavior, not only final totals.
+- Telemetry samples now include sparse per-drone trajectory vectors, synchronized to the same sample cadence as other run metrics. JSON keeps the trajectory samples; CSV stores run-level trajectory aggregates such as average/max drone path length and path imbalance.
+- Current roles share baseline mapping. Scouts, mappers, relays, and verifiers differ through task assignment, AOI focus, role counts, movement, network compliance, and derived controls; future behavior work should make these role-specific control surfaces more distinct.
 - LiDAR area coverage is estimated separately from raw point storage. Each hit contributes a distance-scaled footprint radius for coverage/resolution/redundancy metrics, but it does not create synthetic point-cloud samples.
 - Inter-drone footprint redundancy now feeds back into formation spacing: overlapping LiDAR footprints increase area-spread pressure, while low footprint resolution can tighten spacing for detail.
 - Telemetry can sort saved runs by score, confidence, or subscore, filter to valid runs only, and filter by AOI scenario.
 - Telemetry defaults to the active model family, so old runs remain stored locally but do not mix into grey-box comparison/export by default.
 - Future adversarial non-combat stressors are allowed as safety/resilience scenarios: moving obstacles, deliberate occlusion, degraded commercial comms, GPS/sensor dropouts, emergency landing, high-risk AOI proximity, and cluttered/deceptive environments.
+- Future semantic maps should use rational object relations, attach semantic labels to scan hits, and support semantic point-cloud/reconstruction exports for language-aware 3DGS work.
 - `SWARM_ALGORITHM.md` is the detailed design rationale for the math, parameter dependencies, optimization direction, and reasoning history behind this approach.
+- `RESEARCH_ROADMAP.md` tracks the research execution path, dataset readiness, Bayesian/GP sequence, and longer-term AI directions.
 
 Formation notes:
 

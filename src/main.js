@@ -46,13 +46,19 @@ const els = {
   telemetryPanel: document.querySelector('#telemetryPanel'),
   telemetryRefreshBtn: document.querySelector('#telemetryRefreshBtn'),
   telemetryExportBtn: document.querySelector('#telemetryExportBtn'),
+  telemetryExportCsvBtn: document.querySelector('#telemetryExportCsvBtn'),
   telemetrySort: document.querySelector('#telemetrySort'),
   telemetryScenarioFilter: document.querySelector('#telemetryScenarioFilter'),
+  telemetryWorkspaceFilter: document.querySelector('#telemetryWorkspaceFilter'),
   telemetryValidOnly: document.querySelector('#telemetryValidOnly'),
   telemetryRunCount: document.querySelector('#telemetryRunCount'),
   telemetryValidCount: document.querySelector('#telemetryValidCount'),
   telemetryLatestHits: document.querySelector('#telemetryLatestHits'),
   telemetryRuns: document.querySelector('#telemetryRuns'),
+  workspaceClearTarget: document.querySelector('#workspaceClearTarget'),
+  workspaceClearConfirm: document.querySelector('#workspaceClearConfirm'),
+  workspaceRemoveName: document.querySelector('#workspaceRemoveName'),
+  workspaceClearBtn: document.querySelector('#workspaceClearBtn'),
   algorithmPanel: document.querySelector('#algorithmPanel'),
   algorithmWeights: document.querySelector('#algorithmWeights'),
   algorithmSignals: document.querySelector('#algorithmSignals'),
@@ -69,12 +75,16 @@ const els = {
   communicationDropout: document.querySelector('#communicationDropout'),
   swarmScanDensity: document.querySelector('#swarmScanDensity'),
   performanceBudget: document.querySelector('#performanceBudget'),
+  datasetWorkspace: document.querySelector('#datasetWorkspace'),
+  datasetWorkspaceSelect: document.querySelector('#datasetWorkspaceSelect'),
+  datasetWorkspaceSaveBtn: document.querySelector('#datasetWorkspaceSaveBtn'),
   objectiveProfile: document.querySelector('#objectiveProfile'),
   policyCoverageArea: document.querySelector('#policyCoverageArea'),
   policyAoiDetail: document.querySelector('#policyAoiDetail'),
   policyRiskSafety: document.querySelector('#policyRiskSafety'),
   policyResourceEfficiency: document.querySelector('#policyResourceEfficiency'),
   runtimeNudgeProfile: document.querySelector('#runtimeNudgeProfile'),
+  policyExperimentMode: document.querySelector('#policyExperimentMode'),
   policyExperimentSeconds: document.querySelector('#policyExperimentSeconds'),
   policyCoverageAreaValue: document.querySelector('#policyCoverageAreaValue'),
   policyAoiDetailValue: document.querySelector('#policyAoiDetailValue'),
@@ -225,7 +235,7 @@ const sim = {
   },
   policyExperiment: {
     active: false,
-    runMs: 35000,
+    runMs: 120000,
     currentIndex: 0,
     runPlan: [],
     waitingForNext: false,
@@ -272,6 +282,8 @@ const POLICY_EXPERIMENT_PRESETS = [
 ];
 
 const POLICY_EXPERIMENT_NUDGE_PROFILES = ['very_low', 'low', 'current', 'strong', 'very_strong'];
+const DATASET_WORKSPACES_KEY = 'autonomous-terrain-swarm-workspaces';
+const DEFAULT_DATASET_WORKSPACE = 'greybox-calibration-v1';
 
 const main = createMainScene();
 const cloud = createCloudScene();
@@ -510,9 +522,34 @@ function setupUI() {
   els.policyExperimentBtn.addEventListener('click', () => togglePolicyExperimentBatch());
   els.telemetryRefreshBtn.addEventListener('click', () => refreshTelemetryPanel());
   els.telemetryExportBtn.addEventListener('click', () => exportTelemetryRuns());
+  els.telemetryExportCsvBtn.addEventListener('click', () => exportTelemetryRunsCsv());
   els.telemetrySort.addEventListener('change', () => refreshTelemetryPanel());
   els.telemetryScenarioFilter.addEventListener('change', () => refreshTelemetryPanel());
+  els.telemetryWorkspaceFilter.addEventListener('change', () => {
+    refreshWorkspaceClearControls();
+    refreshTelemetryPanel();
+  });
   els.telemetryValidOnly.addEventListener('change', () => refreshTelemetryPanel());
+  els.workspaceClearConfirm.addEventListener('input', () => refreshWorkspaceClearControls());
+  els.workspaceRemoveName.addEventListener('change', () => refreshWorkspaceClearControls());
+  els.workspaceClearBtn.addEventListener('click', () => clearSelectedWorkspaceTelemetry());
+  els.datasetWorkspaceSaveBtn.addEventListener('click', () => saveCurrentDatasetWorkspace());
+  els.datasetWorkspaceSelect.addEventListener('change', () => {
+    if (els.datasetWorkspaceSelect.value) {
+      els.datasetWorkspace.value = els.datasetWorkspaceSelect.value;
+      saveCurrentDatasetWorkspace(false);
+      refreshWorkspaceClearControls();
+      refreshTelemetryPanel();
+    }
+  });
+  els.datasetWorkspace.addEventListener('change', () => {
+    saveCurrentDatasetWorkspace(false);
+    refreshWorkspaceClearControls();
+    refreshTelemetryPanel();
+  });
+  document.querySelectorAll('.controls-panel input, .controls-panel select, .controls-panel textarea').forEach((control) => {
+    control.addEventListener('change', () => restoreViewportKeyboardFocus());
+  });
 
   els.sensorPreset.addEventListener('change', () => {
     resetMissionForControlChange('Sensor preset changed; previous run saved and map cleared.');
@@ -531,7 +568,7 @@ function setupUI() {
   ].forEach((input) => {
     input.addEventListener('change', () => {
       resetMissionForControlChange('Terrain controls changed; previous run saved and map cleared.');
-      regenerateEnvironment(false);
+      regenerateEnvironment(false, { fitCamera: false });
       syncSwarmMode();
       logMessage('Terrain generation updated from the controls.');
     });
@@ -634,7 +671,7 @@ function setupUI() {
     input.addEventListener('change', () => {
       resetMissionForControlChange('Experiment-defining swarm controls changed; previous run saved and map cleared.');
       if (input === els.environmentMode || input === els.aoiPreset) {
-        regenerateEnvironment(false);
+        regenerateEnvironment(false, { fitCamera: false });
       }
       syncSwarmMode();
       refreshStatus();
@@ -644,6 +681,7 @@ function setupUI() {
 
   makeOverlayDraggable();
   setupViewportNavigation();
+  initializeDatasetWorkspaceManager();
   applyPerformanceBudget(true);
   refreshStatus();
 }
@@ -675,6 +713,133 @@ function isEditableTarget(target) {
   return tag === 'input' || tag === 'select' || tag === 'textarea' || target?.isContentEditable;
 }
 
+function restoreViewportKeyboardFocus() {
+  if (document.activeElement?.closest?.('.controls-panel')) {
+    document.activeElement.blur();
+  }
+  const targetScene = sim.navigation.activeViewport === 'cloud' ? cloud : main;
+  targetScene?.renderer?.domElement?.focus?.({ preventScroll: true });
+}
+
+function initializeDatasetWorkspaceManager() {
+  const workspaces = datasetWorkspaceList();
+  const current = localStorage.getItem(`${DATASET_WORKSPACES_KEY}:active`) || workspaces[0] || DEFAULT_DATASET_WORKSPACE;
+  els.datasetWorkspace.value = current;
+  renderDatasetWorkspaceOptions(workspaces.includes(current) ? workspaces : [current, ...workspaces]);
+}
+
+function datasetWorkspaceList() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DATASET_WORKSPACES_KEY) || '[]');
+    const values = Array.isArray(parsed) ? parsed : [];
+    return uniqueWorkspaceNames([DEFAULT_DATASET_WORKSPACE, ...values]);
+  } catch {
+    return [DEFAULT_DATASET_WORKSPACE];
+  }
+}
+
+function saveCurrentDatasetWorkspace(writeLog = true) {
+  const workspace = datasetWorkspaceName();
+  const workspaces = uniqueWorkspaceNames([workspace, ...datasetWorkspaceList()]);
+  localStorage.setItem(DATASET_WORKSPACES_KEY, JSON.stringify(workspaces));
+  localStorage.setItem(`${DATASET_WORKSPACES_KEY}:active`, workspace);
+  renderDatasetWorkspaceOptions(workspaces);
+  if (writeLog) {
+    logMessage(`Dataset workspace set to ${workspace}. New runs and exports will be tagged with this workspace.`);
+  }
+}
+
+function renderDatasetWorkspaceOptions(workspaces = datasetWorkspaceList()) {
+  const current = datasetWorkspaceName();
+  const previousFilter = els.telemetryWorkspaceFilter.value || 'active';
+  els.datasetWorkspaceSelect.innerHTML = workspaces
+    .map((workspace) => `<option value="${escapeHtml(workspace)}"${workspace === current ? ' selected' : ''}>${escapeHtml(workspace)}</option>`)
+    .join('');
+  els.telemetryWorkspaceFilter.innerHTML = [
+    '<option value="active" selected>Active workspace</option>',
+    '<option value="all">All workspaces</option>',
+    '<option value="legacy">Legacy/untagged</option>',
+    ...workspaces.map((workspace) => `<option value="${escapeHtml(workspace)}">${escapeHtml(workspace)}</option>`)
+  ].join('');
+  els.telemetryWorkspaceFilter.value = [...els.telemetryWorkspaceFilter.options].some((option) => option.value === previousFilter)
+    ? previousFilter
+    : 'active';
+  refreshWorkspaceClearControls();
+}
+
+function uniqueWorkspaceNames(values) {
+  return [...new Set(values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+    .slice(0, 30);
+}
+
+function workspaceClearTarget() {
+  const selected = els.telemetryWorkspaceFilter?.value ?? 'active';
+  if (selected === 'all') {
+    return null;
+  }
+  if (selected === 'legacy') {
+    return {
+      key: 'legacy',
+      label: 'legacy',
+      removeNameAllowed: false
+    };
+  }
+  const workspace = selected === 'active' ? datasetWorkspaceName() : selected;
+  return {
+    key: workspace,
+    label: workspace,
+    removeNameAllowed: workspace !== DEFAULT_DATASET_WORKSPACE
+  };
+}
+
+function refreshWorkspaceClearControls() {
+  if (!els.workspaceClearTarget) {
+    return;
+  }
+  const target = workspaceClearTarget();
+  const typed = els.workspaceClearConfirm.value.trim();
+  const exactMatch = Boolean(target && typed === target.label);
+  els.workspaceClearTarget.textContent = target
+    ? `Target: ${target.label}`
+    : 'Select one workspace; all workspaces cannot be cleared here.';
+  els.workspaceClearBtn.disabled = !exactMatch;
+  els.workspaceRemoveName.disabled = !target?.removeNameAllowed;
+  if (!target?.removeNameAllowed) {
+    els.workspaceRemoveName.checked = false;
+  }
+}
+
+async function clearSelectedWorkspaceTelemetry() {
+  const target = workspaceClearTarget();
+  if (!target || els.workspaceClearConfirm.value.trim() !== target.label) {
+    refreshWorkspaceClearControls();
+    return;
+  }
+  const deletedCount = await sim.swarmTelemetry.deleteRunsByWorkspace({
+    workspace: target.key,
+    modelFamily: GREYBOX_POLICY_MODEL.modelFamily
+  });
+  if (els.workspaceRemoveName.checked && target.removeNameAllowed) {
+    removeDatasetWorkspaceName(target.key);
+  }
+  els.workspaceClearConfirm.value = '';
+  refreshWorkspaceClearControls();
+  refreshTelemetryPanel();
+  logMessage(`Cleared ${deletedCount.toLocaleString()} telemetry run(s) from workspace ${target.label}.`);
+}
+
+function removeDatasetWorkspaceName(workspace) {
+  const workspaces = datasetWorkspaceList().filter((name) => name !== workspace || name === DEFAULT_DATASET_WORKSPACE);
+  localStorage.setItem(DATASET_WORKSPACES_KEY, JSON.stringify(workspaces));
+  if (datasetWorkspaceName() === workspace && workspace !== DEFAULT_DATASET_WORKSPACE) {
+    els.datasetWorkspace.value = DEFAULT_DATASET_WORKSPACE;
+    localStorage.setItem(`${DATASET_WORKSPACES_KEY}:active`, DEFAULT_DATASET_WORKSPACE);
+  }
+  renderDatasetWorkspaceOptions(workspaces);
+}
+
 function applySensorPreset(writeLog) {
   const preset = SENSOR_PRESETS[els.sensorPreset.value] || SENSOR_PRESETS.spinning;
   if (els.sensorPreset.value !== 'custom') {
@@ -704,7 +869,7 @@ function currentSensorConfig() {
   };
 }
 
-function regenerateEnvironment(randomizeSeed) {
+function regenerateEnvironment(randomizeSeed, { fitCamera = true } = {}) {
   if (randomizeSeed || !sim.environmentSeed) {
     sim.environmentSeed = generateSeed();
   }
@@ -735,7 +900,13 @@ function regenerateEnvironment(randomizeSeed) {
   prepareRaycastAcceleration(sim.scanTargets);
   initializeMapper();
   applyEnvironmentAtmosphere();
-  fitCamerasToRoom();
+  if (fitCamera) {
+    fitCamerasToRoom();
+  } else {
+    updateCloudReferenceGrid();
+    main.controls.update();
+    cloud.controls.update();
+  }
 }
 
 function currentTerrainConfig() {
@@ -1957,24 +2128,33 @@ function togglePolicyExperimentBatch() {
   }
 
   sim.policyExperiment.active = true;
-  sim.policyExperiment.runMs = clamp(readNumber(els.policyExperimentSeconds), 15, 180) * 1000;
+  sim.policyExperiment.runMs = clamp(readNumber(els.policyExperimentSeconds), 30, 900) * 1000;
   sim.policyExperiment.currentIndex = 0;
-  sim.policyExperiment.runPlan = buildPolicyExperimentRunPlan();
+  sim.policyExperiment.runPlan = buildPolicyExperimentRunPlan(els.policyExperimentMode.value);
   sim.policyExperiment.waitingForNext = false;
-  sim.policyExperiment.batchId = `policy-batch-${new Date().toISOString()}`;
+  sim.policyExperiment.batchId = `policy-batch-${els.policyExperimentMode.value}-${new Date().toISOString()}`;
   updatePolicyExperimentButton();
   refreshStatus();
-  logMessage(`Policy batch started: ${sim.policyExperiment.runPlan.length} runs at ${Math.round(sim.policyExperiment.runMs / 1000)}s each.`);
+  logMessage(`Policy batch started: ${sim.policyExperiment.runPlan.length} ${policyExperimentModeLabel(els.policyExperimentMode.value)} runs at ${Math.round(sim.policyExperiment.runMs / 1000)}s each.`);
   runNextPolicyExperimentPreset();
 }
 
-function buildPolicyExperimentRunPlan() {
-  return POLICY_EXPERIMENT_PRESETS.flatMap((preset) => POLICY_EXPERIMENT_NUDGE_PROFILES.map((nudgeProfile) => ({
+function buildPolicyExperimentRunPlan(mode = 'nudge_calibration') {
+  const nudgeProfiles = mode === 'pareto_only'
+    ? [els.runtimeNudgeProfile.value ?? 'current']
+    : POLICY_EXPERIMENT_NUDGE_PROFILES;
+  return POLICY_EXPERIMENT_PRESETS.flatMap((preset) => nudgeProfiles.map((nudgeProfile) => ({
     ...preset,
+    batchMode: mode,
+    batchModeLabel: policyExperimentModeLabel(mode),
     nudgeProfile,
     nudgeProfileLabel: runtimeNudgeProfileConfig(nudgeProfile).label,
     nudgeScale: runtimeNudgeProfileConfig(nudgeProfile).scale
   })));
+}
+
+function policyExperimentModeLabel(mode) {
+  return mode === 'pareto_only' ? 'Pareto-only fixed-nudge' : 'Nudge-calibration';
 }
 
 function updatePolicyExperimentButton() {
@@ -2107,6 +2287,7 @@ function setupFreeLookControls(element, viewportName) {
     sim.navigation.freeLook.lastY = event.clientY;
     const targetScene = viewportName === 'cloud' ? cloud : main;
     targetScene.controls.enabled = false;
+    element.focus?.({ preventScroll: true });
     element.setPointerCapture(event.pointerId);
     event.preventDefault();
   });
@@ -2912,6 +3093,7 @@ function startSwarmTelemetryRun() {
   const profile = swarmBehaviorProfile();
   sim.swarmTelemetry.startRun({
     scenario: {
+      datasetWorkspace: datasetWorkspaceName(),
       seed: sim.environmentSeed,
       terrain: { ...sim.terrainConfig },
       aoiPreset: els.aoiPreset.value,
@@ -2975,6 +3157,11 @@ function captureControlSnapshot() {
   return snapshot;
 }
 
+function datasetWorkspaceName() {
+  const value = (els.datasetWorkspace?.value ?? '').trim();
+  return value || DEFAULT_DATASET_WORKSPACE;
+}
+
 function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
   if (!sim.swarmTelemetry.active || !sim.swarmController) {
     return;
@@ -3022,12 +3209,49 @@ function recordSwarmTelemetrySample(activeAois = selectedAoiTargets()) {
     aoiInFocus: aoiStats.inFocus,
     aoiFocusedAgents: aoiStats.focusedAgents,
     nearestAoiDistance: aoiStats.nearestDistance,
+    droneTrajectories: buildSparseDroneTrajectories(agents, activeAois),
     totalPathLength,
     energyProxy,
     resources,
     frameAvgMs: sim.performance.frameAvgMs,
     scanPassMs: sim.performance.scanPassMs
   });
+}
+
+function buildSparseDroneTrajectories(agents, activeAois = selectedAoiTargets()) {
+  return agents.map((agent) => {
+    const nearestAoiDistance = activeAois.length
+      ? Math.min(...activeAois.map((aoi) => agent.position.distanceTo(aoi.position)))
+      : null;
+    return {
+      id: agent.id,
+      role: agent.role,
+      status: agent.status,
+      position: vectorRecord(agent.position),
+      velocity: vectorRecord(agent.velocity),
+      target: vectorRecord(agent.smoothedTarget),
+      launchOffset: vectorRecord(agent.position.clone().sub(agent.launchPosition)),
+      pathLengthM: agent.metrics.distanceTraveled,
+      points: agent.metrics.points,
+      scans: agent.metrics.scans,
+      nearestAoiDistance,
+      assignmentType: agent.assignment?.task?.type ?? agent.assignment?.type ?? null,
+      behaviorFocus: agent.behavior?.sensingFocus ?? null,
+      communicationHealth: agent.behavior?.communicationHealth ?? null
+    };
+  });
+}
+
+function vectorRecord(vector) {
+  return {
+    x: roundTelemetryNumber(vector?.x ?? 0),
+    y: roundTelemetryNumber(vector?.y ?? 0),
+    z: roundTelemetryNumber(vector?.z ?? 0)
+  };
+}
+
+function roundTelemetryNumber(value) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
 }
 
 function finalizeSwarmTelemetry(reason) {
@@ -4498,19 +4722,20 @@ function toggleTelemetryPanel() {
 
 async function refreshTelemetryPanel() {
   const allRuns = await sim.swarmTelemetry.listRuns({ limit: 50, modelFamily: GREYBOX_POLICY_MODEL.modelFamily });
-  const validCount = allRuns.filter((run) => run.validity?.complete).length;
-  const scenarioFilteredRuns = filterTelemetryRunsByScenario(allRuns, els.telemetryScenarioFilter.value);
+  const workspaceFilteredRuns = filterTelemetryRunsByWorkspace(allRuns, els.telemetryWorkspaceFilter.value);
+  const validCount = workspaceFilteredRuns.filter((run) => run.validity?.complete).length;
+  const scenarioFilteredRuns = filterTelemetryRunsByScenario(workspaceFilteredRuns, els.telemetryScenarioFilter.value);
   const runs = sortTelemetryRuns(
     els.telemetryValidOnly.checked ? scenarioFilteredRuns.filter((run) => run.validity?.complete) : scenarioFilteredRuns,
     els.telemetrySort.value
-  ).slice(0, 12);
-  const latest = allRuns[0] ?? null;
-  els.telemetryRunCount.textContent = allRuns.length.toLocaleString();
+  );
+  const latest = workspaceFilteredRuns[0] ?? null;
+  els.telemetryRunCount.textContent = workspaceFilteredRuns.length.toLocaleString();
   els.telemetryValidCount.textContent = validCount.toLocaleString();
   els.telemetryLatestHits.textContent = latest ? (latest.totals?.rawHits ?? 0).toLocaleString() : '0';
 
   if (!runs.length) {
-    els.telemetryRuns.innerHTML = allRuns.length
+    els.telemetryRuns.innerHTML = workspaceFilteredRuns.length
       ? '<div class="telemetry-run"><strong>No matching runs</strong><span>Try disabling Valid only or changing the sort mode.</span></div>'
       : `<div class="telemetry-run"><strong>No ${escapeHtml(GREYBOX_POLICY_MODEL.modelFamily)} runs yet</strong><span>Old telemetry remains saved but is hidden from this model-family view.</span></div>`;
     return;
@@ -4538,10 +4763,107 @@ function renderTelemetryRunGroups(runs) {
 
   return groups.map((group) => {
     const header = group.experiment
-      ? `<div class="telemetry-run telemetry-run--batch"><strong>${escapeHtml(group.experiment.batchId)}</strong><span>${group.runs.length} / ${group.experiment.total ?? '?'} policy preset run(s), ${group.experiment.runSeconds ?? '?'}s each</span></div>`
+      ? renderTelemetryBatchSummary(group)
       : '';
     return `${header}${group.runs.map(renderTelemetryRunCard).join('')}`;
   }).join('');
+}
+
+function renderTelemetryBatchSummary(group) {
+  const summary = summarizeTelemetryBatch(group.runs);
+  const bestRun = summary.bestRun;
+  const lowestLossRun = summary.lowestLossRun;
+  return `
+    <div class="telemetry-run telemetry-run--batch">
+      <strong>${escapeHtml(group.experiment.batchId)}</strong>
+      <span>${group.runs.length} / ${group.experiment.total ?? '?'} policy/nudge run(s), ${group.experiment.runSeconds ?? '?'}s each. Valid ${summary.validCount}, invalid ${summary.invalidCount}, cancelled ${summary.cancelledCount}. Averages use valid runs only.</span>
+      <span>Batch mode: ${escapeHtml(group.experiment.batchModeLabel ?? policyExperimentModeLabel(group.experiment.batchMode))}</span>
+      <span>Avg score ${formatScore(summary.avgScore)}, avg loss ${formatScore(summary.avgLoss)}, avg Pareto: coverage ${formatScore(summary.avgPareto.coverage_area)}, AOI ${formatScore(summary.avgPareto.aoi_detail)}, safety ${formatScore(summary.avgPareto.risk_safety)}, resource ${formatScore(summary.avgPareto.resource_efficiency)}</span>
+      <span>Best score: ${bestRun ? escapeHtml(batchRunLabel(bestRun.run)) : '--'} at ${formatScore(bestRun?.scoring.total)}. Lowest loss: ${lowestLossRun ? escapeHtml(batchRunLabel(lowestLossRun.run)) : '--'} at ${formatScore(lowestLossRun?.scoring.paretoLoss)}</span>
+      <span>Preset averages: ${renderBatchAverageList(summary.byPreset)}</span>
+      <span>Nudge averages: ${renderBatchAverageList(summary.byNudge)}</span>
+    </div>
+  `;
+}
+
+function summarizeTelemetryBatch(runs) {
+  const scoredRuns = runs.map((run) => ({
+    run,
+    scoring: scoreRunForActiveObjective(run)
+  }));
+  const validScoredRuns = scoredRuns.filter(({ run }) => run.validity?.complete);
+  const analysisRuns = validScoredRuns.length ? validScoredRuns : scoredRuns;
+  const cancelledCount = runs.filter((run) => run.status === 'cancelled_batch' || run.validity?.flags?.includes('batch_cancelled')).length;
+  return {
+    validCount: validScoredRuns.length,
+    invalidCount: runs.length - validScoredRuns.length,
+    cancelledCount,
+    avgScore: average(analysisRuns.map(({ scoring }) => scoring.total)),
+    avgLoss: average(analysisRuns.map(({ scoring }) => scoring.paretoLoss)),
+    avgPareto: averagePareto(analysisRuns),
+    bestRun: bestBy(analysisRuns, ({ scoring }) => scoring.total),
+    lowestLossRun: bestBy(analysisRuns, ({ scoring }) => -scoring.paretoLoss),
+    byPreset: summarizeBatchDimension(analysisRuns, (run) => run.scenario?.policyExperiment?.label ?? 'Manual'),
+    byNudge: summarizeBatchDimension(analysisRuns, (run) => run.scenario?.policyExperiment?.nudgeProfileLabel ?? run.runtimeNudgeProfile ?? 'Unknown')
+  };
+}
+
+function summarizeBatchDimension(scoredRuns, labelForRun) {
+  const groups = new Map();
+  scoredRuns.forEach((item) => {
+    const label = labelForRun(item.run);
+    const group = groups.get(label) ?? [];
+    group.push(item);
+    groups.set(label, group);
+  });
+  return [...groups.entries()]
+    .map(([label, items]) => ({
+      label,
+      count: items.length,
+      avgScore: average(items.map(({ scoring }) => scoring.total)),
+      avgLoss: average(items.map(({ scoring }) => scoring.paretoLoss)),
+      avgPareto: averagePareto(items)
+    }))
+    .sort((a, b) => b.avgScore - a.avgScore);
+}
+
+function averagePareto(scoredRuns) {
+  return {
+    coverage_area: average(scoredRuns.map(({ scoring }) => scoring.paretoVector?.coverage_area)),
+    aoi_detail: average(scoredRuns.map(({ scoring }) => scoring.paretoVector?.aoi_detail)),
+    risk_safety: average(scoredRuns.map(({ scoring }) => scoring.paretoVector?.risk_safety)),
+    resource_efficiency: average(scoredRuns.map(({ scoring }) => scoring.paretoVector?.resource_efficiency))
+  };
+}
+
+function renderBatchAverageList(items) {
+  if (!items.length) {
+    return '--';
+  }
+  return items
+    .map((item) => `${escapeHtml(item.label)} ${formatScore(item.avgScore)} / loss ${formatScore(item.avgLoss)} / n${item.count}`)
+    .join('; ');
+}
+
+function batchRunLabel(run) {
+  const experiment = run.scenario?.policyExperiment ?? {};
+  const label = experiment.label ?? run.status ?? 'run';
+  const nudge = experiment.nudgeProfileLabel ?? run.runtimeNudgeProfile ?? run.behaviorProfile?.runtimeNudgeProfile ?? 'nudge';
+  return `${label} / ${nudge}`;
+}
+
+function bestBy(items, scoreFn) {
+  return items.reduce((best, item) => {
+    if (!best || scoreFn(item) > scoreFn(best)) {
+      return item;
+    }
+    return best;
+  }, null);
+}
+
+function average(values) {
+  const finite = values.filter((value) => typeof value === 'number' && Number.isFinite(value));
+  return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : 0;
 }
 
 function renderTelemetryRunCard(run) {
@@ -4574,6 +4896,20 @@ function filterTelemetryRunsByScenario(runs, scenarioFilter) {
     return runs;
   }
   return runs.filter((run) => (run.scenario?.aoiPreset ?? 'auto') === scenarioFilter);
+}
+
+function filterTelemetryRunsByWorkspace(runs, workspaceFilter = 'active') {
+  if (!workspaceFilter || workspaceFilter === 'active') {
+    const activeWorkspace = datasetWorkspaceName();
+    return runs.filter((run) => (run.scenario?.datasetWorkspace ?? 'legacy') === activeWorkspace);
+  }
+  if (workspaceFilter === 'all') {
+    return runs;
+  }
+  if (workspaceFilter === 'legacy') {
+    return runs.filter((run) => !run.scenario?.datasetWorkspace);
+  }
+  return runs.filter((run) => run.scenario?.datasetWorkspace === workspaceFilter);
 }
 
 function scoreRunForActiveObjective(run) {
@@ -4609,7 +4945,7 @@ function sortTelemetryRuns(runs, sortMode) {
 }
 
 async function exportTelemetryRuns() {
-  const runs = await sim.swarmTelemetry.exportRuns({ modelFamily: GREYBOX_POLICY_MODEL.modelFamily });
+  const runs = await telemetryRunsForExport();
   if (!runs.length) {
     logMessage('No telemetry runs saved yet.');
     return;
@@ -4619,10 +4955,135 @@ async function exportTelemetryRuns() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `swarm-telemetry-${GREYBOX_POLICY_MODEL.modelFamily}-${GREYBOX_POLICY_MODEL.modelVersion}-${sim.environmentSeed}.json`;
+  anchor.download = `swarm-telemetry-${safeFilenamePart(datasetWorkspaceName())}-${GREYBOX_POLICY_MODEL.modelFamily}-${GREYBOX_POLICY_MODEL.modelVersion}-${sim.environmentSeed}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
   logMessage(`Telemetry exported with ${runs.length.toLocaleString()} saved run(s).`);
+}
+
+async function exportTelemetryRunsCsv() {
+  const runs = await telemetryRunsForExport();
+  if (!runs.length) {
+    logMessage('No telemetry runs saved yet.');
+    return;
+  }
+
+  const rows = runs.map((run) => telemetryRunCsvRow(run));
+  const csv = csvStringify(rows);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `swarm-runs-${safeFilenamePart(datasetWorkspaceName())}-${GREYBOX_POLICY_MODEL.modelFamily}-${GREYBOX_POLICY_MODEL.modelVersion}-${sim.environmentSeed}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  logMessage(`Telemetry CSV exported with ${runs.length.toLocaleString()} run row(s).`);
+}
+
+async function telemetryRunsForExport() {
+  const runs = await sim.swarmTelemetry.exportRuns({ modelFamily: GREYBOX_POLICY_MODEL.modelFamily });
+  const workspaceFiltered = filterTelemetryRunsByWorkspace(runs, els.telemetryWorkspaceFilter.value);
+  return filterTelemetryRunsByScenario(workspaceFiltered, els.telemetryScenarioFilter.value);
+}
+
+function telemetryRunCsvRow(run) {
+  const scoring = scoreRunForActiveObjective(run);
+  const experiment = run.scenario?.policyExperiment ?? {};
+  const pareto = scoring.paretoVector ?? {};
+  const components = scoring.components ?? {};
+  const temporal = run.temporalSummary ?? scoring.temporalMeasures ?? {};
+  const nudge = run.nudgeSummary ?? {};
+  return {
+    run_id: run.id,
+    dataset_workspace: run.scenario?.datasetWorkspace ?? datasetWorkspaceName(),
+    model_family: run.modelFamily ?? GREYBOX_POLICY_MODEL.modelFamily,
+    model_version: run.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
+    status: run.status,
+    valid: Boolean(run.validity?.complete),
+    validity_flags: (run.validity?.flags ?? []).join('|'),
+    batch_id: experiment.batchId ?? '',
+    batch_mode: experiment.batchMode ?? '',
+    batch_index: experiment.index ?? '',
+    batch_total: experiment.total ?? '',
+    policy_preset: experiment.label ?? '',
+    nudge_profile: experiment.nudgeProfile ?? run.runtimeNudgeProfile ?? '',
+    nudge_scale: experiment.nudgeScale ?? run.runtimeNudgeScale ?? '',
+    objective_profile: run.behaviorProfile?.objective ?? '',
+    aoi_preset: run.scenario?.aoiPreset ?? '',
+    aoi_count: run.aoi?.selectedCount ?? 0,
+    nearest_aoi_distance: run.scenario?.aoiNearestDistance ?? '',
+    elapsed_s: (run.elapsedMs ?? 0) / 1000,
+    raw_hits: run.totals?.rawHits ?? 0,
+    focused_hits: run.totals?.focusedHits ?? 0,
+    aoi_hits: run.totals?.aoiHits ?? 0,
+    point_voxels: run.totals?.pointVoxels ?? 0,
+    unique_footprint_area_m2: run.totals?.uniqueFootprintAreaM2 ?? 0,
+    redundant_footprint_area_m2: run.totals?.redundantFootprintAreaM2 ?? 0,
+    score: scoring.total,
+    pareto_loss: scoring.paretoLoss,
+    confidence: scoring.confidence,
+    pareto_coverage_area: pareto.coverage_area ?? 0,
+    pareto_aoi_detail: pareto.aoi_detail ?? 0,
+    pareto_risk_safety: pareto.risk_safety ?? 0,
+    pareto_resource_efficiency: pareto.resource_efficiency ?? 0,
+    component_aoi_quality: components.aoiQuality ?? 0,
+    component_coverage: components.coverage ?? 0,
+    component_network_resilience: components.networkResilience ?? 0,
+    component_compute_efficiency: components.computeEfficiency ?? 0,
+    component_energy_proxy: components.energyProxy ?? 0,
+    component_adaptation_smoothness: components.adaptationSmoothness ?? 0,
+    component_constraint_safety: components.constraintSafety ?? 0,
+    psi_coverage_area: run.policyCoordinates?.coverage_area ?? '',
+    psi_aoi_detail: run.policyCoordinates?.aoi_detail ?? '',
+    psi_risk_safety: run.policyCoordinates?.risk_safety ?? '',
+    psi_resource_efficiency: run.policyCoordinates?.resource_efficiency ?? '',
+    effective_psi_coverage_area: run.effectivePolicyCoordinates?.coverage_area ?? '',
+    effective_psi_aoi_detail: run.effectivePolicyCoordinates?.aoi_detail ?? '',
+    effective_psi_risk_safety: run.effectivePolicyCoordinates?.risk_safety ?? '',
+    effective_psi_resource_efficiency: run.effectivePolicyCoordinates?.resource_efficiency ?? '',
+    avg_abs_delta_psi: nudge.avgAbsDeltaPsi ?? temporal.avgAbsDeltaPsi ?? 0,
+    max_abs_delta_psi: nudge.maxAbsDeltaPsi ?? temporal.maxAbsDeltaPsi ?? 0,
+    trajectory_samples: run.samples?.filter((sample) => sample.droneTrajectories?.length).length ?? 0,
+    avg_drone_path_length_m: run.trajectorySummary?.avgDronePathLength ?? run.movement?.avgDronePathLength ?? 0,
+    max_drone_path_length_m: run.trajectorySummary?.maxDronePathLength ?? run.movement?.maxDronePathLength ?? 0,
+    path_imbalance: run.trajectorySummary?.pathImbalance ?? run.movement?.pathImbalance ?? 0,
+    avg_new_voxels_per_s: temporal.avgNewPointVoxelsPerSecond ?? 0,
+    avg_aoi_hits_per_s: temporal.avgAoiHitsPerSecond ?? 0,
+    useful_aoi_hits_per_s_after_contact: temporal.usefulAoiHitRateAfterContact ?? 0,
+    network_fragmented_s: temporal.networkFragmentedSeconds ?? 0,
+    risk_exposure_s: temporal.riskExposureSeconds ?? 0,
+    battery_remaining_pct: run.resources?.batteryRemainingPct ?? '',
+    total_energy_wh: run.resources?.totalEnergyWh ?? '',
+    path_length_m: run.movement?.pathLength ?? ''
+  };
+}
+
+function csvStringify(rows) {
+  if (!rows.length) {
+    return '';
+  }
+  const headers = Object.keys(rows[0]);
+  const lines = [
+    headers.join(','),
+    ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(','))
+  ];
+  return lines.join('\n');
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function safeFilenamePart(value) {
+  return String(value || 'dataset')
+    .trim()
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'dataset';
 }
 
 function escapeHtml(value) {

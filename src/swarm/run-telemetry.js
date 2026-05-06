@@ -67,7 +67,10 @@ export class SwarmRunTelemetry {
       },
       movement: {
         pathLength: 0,
-        energyProxy: 0
+        energyProxy: 0,
+        avgDronePathLength: 0,
+        maxDronePathLength: 0,
+        pathImbalance: 0
       },
       resources: {
         modelVersion: null,
@@ -214,6 +217,13 @@ export class SwarmRunTelemetry {
     }
     this.currentRun.movement.pathLength = sample.totalPathLength ?? this.currentRun.movement.pathLength;
     this.currentRun.movement.energyProxy = sample.energyProxy ?? this.currentRun.movement.energyProxy;
+    if (sample.droneTrajectories?.length) {
+      const trajectorySummary = summarizeTrajectoryMetrics([sample]);
+      this.currentRun.movement.avgDronePathLength = trajectorySummary.avgDronePathLength;
+      this.currentRun.movement.maxDronePathLength = trajectorySummary.maxDronePathLength;
+      this.currentRun.movement.pathImbalance = trajectorySummary.pathImbalance;
+      this.currentRun.trajectorySummary = trajectorySummary;
+    }
     if (sample.resources) {
       this.currentRun.resources = {
         ...this.currentRun.resources,
@@ -244,6 +254,7 @@ export class SwarmRunTelemetry {
     run.validity = validity ?? run.validity;
     run.temporalSummary = summarizeTemporalMetrics(run.samples);
     run.nudgeSummary = summarizeNudgeMetrics(run.samples);
+    run.trajectorySummary = summarizeTrajectoryMetrics(run.samples);
     run.scoring = scoring ?? run.scoring ?? null;
     run.notes.push(...notes);
     this.currentRun = null;
@@ -286,6 +297,35 @@ export class SwarmRunTelemetry {
 
   async exportRuns({ modelFamily = null } = {}) {
     return this.listRuns({ limit: Number.MAX_SAFE_INTEGER, modelFamily });
+  }
+
+  async deleteRunsByWorkspace({ workspace, modelFamily = null } = {}) {
+    if (!workspace) {
+      return 0;
+    }
+    try {
+      const db = await this.openDb();
+      const runs = await this.listRuns({ limit: Number.MAX_SAFE_INTEGER, modelFamily });
+      const ids = runs
+        .filter((run) => workspace === 'legacy'
+          ? !run.scenario?.datasetWorkspace
+          : run.scenario?.datasetWorkspace === workspace)
+        .map((run) => run.id);
+      if (!ids.length) {
+        return 0;
+      }
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        ids.forEach((id) => store.delete(id));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      return ids.length;
+    } catch (error) {
+      console.warn('Unable to delete workspace telemetry runs.', error);
+      return 0;
+    }
   }
 
   openDb() {
@@ -350,6 +390,28 @@ function computeTemporalMetrics(previousSample, sample) {
     riskPressure: sample.normalizedSignals?.riskPressure ?? 0,
     aoiProximityRisk: sample.normalizedSignals?.aoiProximityRisk ?? 0,
     aoiActive: sample.aoiInFocus || (sample.aoiFocusedAgents ?? 0) > 0 ? 1 : 0
+  };
+}
+
+function summarizeTrajectoryMetrics(samples = []) {
+  const latest = [...samples].reverse().find((sample) => sample.droneTrajectories?.length) ?? null;
+  const trajectories = latest?.droneTrajectories ?? [];
+  if (!trajectories.length) {
+    return {
+      droneCount: 0,
+      avgDronePathLength: 0,
+      maxDronePathLength: 0,
+      pathImbalance: 0
+    };
+  }
+  const paths = trajectories.map((item) => item.pathLengthM ?? 0);
+  const avg = paths.reduce((sum, value) => sum + value, 0) / paths.length;
+  const max = paths.reduce((largest, value) => Math.max(largest, value), 0);
+  return {
+    droneCount: trajectories.length,
+    avgDronePathLength: avg,
+    maxDronePathLength: max,
+    pathImbalance: max / Math.max(avg, 1e-6)
   };
 }
 

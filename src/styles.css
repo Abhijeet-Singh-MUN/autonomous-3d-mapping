@@ -210,6 +210,30 @@ button.primary {
   gap: 12px;
 }
 
+.control-clusters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-cluster {
+  border: 1px solid rgba(150, 179, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(8, 14, 26, 0.45);
+}
+
+.control-cluster summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: #dbe7ff;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.control-cluster .control-grid {
+  padding: 0 12px 12px;
+}
+
 .control-grid label {
   display: flex;
   flex-direction: column;
@@ -320,6 +344,39 @@ input {
   border-radius: 8px;
   background: rgba(12, 19, 34, 0.94);
   white-space: nowrap;
+}
+
+.telemetry-help {
+  margin: -2px 0 12px;
+  color: #9fb0d8;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.workspace-clear {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 172, 118, 0.2);
+  border-radius: 8px;
+  background: rgba(40, 21, 14, 0.32);
+}
+
+.workspace-clear strong,
+.workspace-clear > span,
+.workspace-clear label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #dbe7ff;
+  font-size: 0.83rem;
+}
+
+.workspace-clear > span {
+  color: #ffc18e;
 }
 
 .checkbox-label input {
@@ -491,6 +548,7 @@ input {
   .button-row--wide,
   .button-row--split,
   .control-grid,
+  .workspace-clear,
   .stats-grid--wide {
     grid-template-columns: 1fr;
   }

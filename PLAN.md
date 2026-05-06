@@ -36,10 +36,22 @@ Swarm V1 builds on that system without rewriting the current path planner.
 - Exports:
   - Point-cloud tiles with metadata
   - Mission replay logs with trajectories, roles, formation states, communication graph snapshots, scan events, and AOI events
+  - Telemetry JSON for full local records and telemetry CSV for external statistics/optimizer ingestion
 - Grey-box calibration:
   - Four optimizer-facing policy coordinates: coverage area, AOI detail, risk safety, and resource efficiency
   - Uniform runtime nudge profiles for measuring local adaptation strength before optimizer work
   - Policy batch runs that vary policy presets and nudge profiles while keeping the scenario fixed
+  - In-sim batch summaries for quick validity, best-run, average score/loss, and Pareto-vector checks before external analysis
+  - Calibration sequence: run the first 20-run nudge sweep, choose/freeze a default nudge profile, then switch to Pareto-only 4-run batches that keep that nudge profile fixed
+  - Dataset workspace names that tag telemetry runs and export filenames for separate calibration/experiment campaigns
+  - Browser-local workspace manager for saving/selecting/filtering/clearing experiment campaigns with exact-name confirmation
+  - Fixed-time run budgets remain the comparison standard; start with 120s nudge batches and test 180s only if AOI dwell/contact remains weak
+  - Defer auto-duration. Compare within AOI scenarios at fixed time and record distance/path/contact variation for later analysis.
+  - Strengthen role-specific control surfaces after nudge calibration: shared baseline mapping remains, but scout/mapper/relay/verifier should respond distinctly to Pareto and derived parameters
+- Future semantic mapping:
+  - Rational object/terrain layouts instead of arbitrary random placements
+  - Semantic labels attached to object hits and point-cloud export records
+  - Scene families for grey-box behavior, 3DGS reconstruction, active latent-space exploration, world-model datasets, and later adversarial non-combat stressors
 - Adversarial non-combat stressors:
   - Moving obstacles
   - Deliberate occlusion

@@ -60,7 +60,10 @@
             <button id="policyExperimentBtn">Run Policy Batch</button>
           </div>
 
-          <div class="control-grid">
+          <div class="control-clusters">
+            <details class="control-cluster" open>
+              <summary>Scenario</summary>
+              <div class="control-grid">
             <label hidden>
               <span>Mission mode</span>
               <select id="missionMode" disabled>
@@ -73,6 +76,15 @@
                 <option value="terrain" selected>Mountain valley sandbox</option>
               </select>
             </label>
+            <label>
+              <span>Dataset workspace</span>
+              <input id="datasetWorkspace" type="text" value="greybox-calibration-v1" />
+            </label>
+            <label>
+              <span>Saved workspace</span>
+              <select id="datasetWorkspaceSelect"></select>
+            </label>
+            <button id="datasetWorkspaceSaveBtn" type="button">Save Workspace</button>
             <label>
               <span>Terrain width</span>
               <input id="terrainWidth" type="number" min="80" max="320" step="10" value="180" />
@@ -114,6 +126,11 @@
                 <option value="aperture">Valley aperture</option>
               </select>
             </label>
+              </div>
+            </details>
+            <details class="control-cluster" open>
+              <summary>Swarm and network</summary>
+              <div class="control-grid">
             <label>
               <span>Swarm drones</span>
               <input id="swarmSize" type="number" min="3" max="24" step="1" value="24" />
@@ -141,6 +158,11 @@
               <span>Link dropout probability</span>
               <input id="communicationDropout" type="number" min="0" max="0.45" step="0.01" value="0" />
             </label>
+              </div>
+            </details>
+            <details class="control-cluster" open>
+              <summary>Capture and performance</summary>
+              <div class="control-grid">
             <label>
               <span>Swarm scan density</span>
               <select id="swarmScanDensity">
@@ -163,6 +185,19 @@
                 <option value="custom">Custom</option>
               </select>
             </label>
+            <label>
+              <span>Visible point cap</span>
+              <input id="visiblePointBudget" type="number" min="10000" max="1200000" step="25000" value="650000" />
+            </label>
+            <label>
+              <span>Render scale cap</span>
+              <input id="renderScaleBudget" type="number" min="0.65" max="2" step="0.05" value="1.35" />
+            </label>
+              </div>
+            </details>
+            <details class="control-cluster" open>
+              <summary>Grey-box policy</summary>
+              <div class="control-grid">
             <label>
               <span>Objective profile</span>
               <select id="objectiveProfile">
@@ -201,17 +236,21 @@
               </select>
             </label>
             <label>
+              <span>Policy batch mode</span>
+              <select id="policyExperimentMode">
+                <option value="nudge_calibration" selected>Nudge calibration 20 runs</option>
+                <option value="pareto_only">Pareto only current nudge 4 runs</option>
+              </select>
+            </label>
+            <label>
               <span>Policy batch seconds</span>
-              <input id="policyExperimentSeconds" type="number" min="15" max="180" step="5" value="35" />
+              <input id="policyExperimentSeconds" type="number" min="30" max="900" step="5" value="120" />
             </label>
-            <label>
-              <span>Visible point cap</span>
-              <input id="visiblePointBudget" type="number" min="10000" max="1200000" step="25000" value="650000" />
-            </label>
-            <label>
-              <span>Render scale cap</span>
-              <input id="renderScaleBudget" type="number" min="0.65" max="2" step="0.05" value="1.35" />
-            </label>
+              </div>
+            </details>
+            <details class="control-cluster">
+              <summary>Advanced flight and planner</summary>
+              <div class="control-grid">
             <label hidden>
               <span>Scan mode</span>
               <select id="scanMode">
@@ -284,6 +323,8 @@
               <span>Dwell / scan interval (ms)</span>
               <input id="dwellMs" type="number" min="120" max="2200" step="40" value="500" />
             </label>
+              </div>
+            </details>
           </div>
 
           <div class="stats-grid stats-grid--wide">
@@ -346,6 +387,7 @@
           <div class="button-row button-row--split">
             <button id="telemetryRefreshBtn">Refresh</button>
             <button id="telemetryExportBtn">Export JSON</button>
+            <button id="telemetryExportCsvBtn">Export CSV</button>
           </div>
           <div class="telemetry-filters">
             <label>
@@ -373,10 +415,30 @@
                 <option value="aperture">Aperture</option>
               </select>
             </label>
+            <label>
+              <span>Workspace</span>
+              <select id="telemetryWorkspaceFilter"></select>
+            </label>
             <label class="checkbox-label">
               <input id="telemetryValidOnly" type="checkbox" />
               <span>Valid only</span>
             </label>
+          </div>
+          <p class="telemetry-help">
+            Invalid runs are kept with flags: insufficient scan time, target not reached, insufficient AOI dwell, low raw AOI coverage, performance unstable, or batch cancelled.
+          </p>
+          <div class="workspace-clear">
+            <strong>Clear workspace</strong>
+            <span id="workspaceClearTarget">Active workspace</span>
+            <label>
+              <span>Type workspace name to confirm</span>
+              <input id="workspaceClearConfirm" type="text" />
+            </label>
+            <label class="checkbox-label">
+              <input id="workspaceRemoveName" type="checkbox" />
+              <span>Remove saved workspace name</span>
+            </label>
+            <button id="workspaceClearBtn" type="button" disabled>Clear Workspace</button>
           </div>
           <div class="telemetry-summary">
             <div class="stat-card">

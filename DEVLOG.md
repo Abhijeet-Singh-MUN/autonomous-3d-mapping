@@ -8,6 +8,20 @@ This log captures why changes are made, which issues they address, and what they
 
 - Added uniform runtime nudge profiles for grey-box calibration before optimizer work: very low, low, current, strong, and very strong.
 - Expanded the policy batch runner to test 4 policy presets across 5 nudge profiles for 20 fixed-scenario runs.
+- Added lightweight policy-batch summaries in the telemetry panel so a batch can be checked at a glance before exporting for deeper analysis.
+- Added a policy batch mode selector: nudge calibration runs the 20-run sweep, while Pareto-only uses the currently selected nudge profile for 4-run policy comparisons.
+- Recorded the calibration sequence: use the first 20-run sweep to choose/freeze a nudge profile, then focus later batches on the four main Pareto policy coordinates.
+- Added a dataset workspace field for tagging new telemetry campaigns and export filenames.
+- Added a browser-local workspace manager with saved workspace names and telemetry filtering by active/all/legacy/workspace.
+- Added exact-name workspace clearing for IndexedDB telemetry runs, with optional removal of saved workspace names.
+- Added CSV telemetry export for external analysis while keeping JSON as the full-fidelity record.
+- Added sparse per-drone trajectory vectors to telemetry samples, plus CSV-safe aggregate path-balance fields.
+- Grouped Mission Controls into collapsible scenario, swarm/network, capture/performance, grey-box policy, and advanced flight/planner sections.
+- Kept the hidden A*/Weighted/Greedy planner controls because they remain useful later as baseline algorithm variants, even though Swarm V1 currently emphasizes the grey-box controller.
+- Changed policy batch duration defaults to a flexible 120-second first-test budget, with a 30-900 second UI range for smoke tests and longer AOI/Pareto runs.
+- Decided to defer auto-duration. Fixed 120-second runs remain the calibration standard for now; AOI distance/contact/dwell variation will be recorded and analyzed rather than normalized away.
+- Recorded the role-control direction: every drone keeps baseline mapping, but future behavior work should give scouts, mappers, relays, and verifiers more distinct downstream controls driven by Pareto/effective-psi and derived parameters.
+- Recorded the future semantic-map direction: rational object layouts, semantic point labels, semantic point-cloud export, and language-aware 3DGS/reconstruction data.
 - Telemetry now records base psi, runtime nudge, effective psi, delta psi, nudge profile, and avg/max absolute delta psi.
 - Documented adversarial non-combat stressors as allowed future resilience/dataset scenarios while keeping strike, targeting, weapons, military autonomy, and harmful jamming instructions out of scope.
 - Changed the default scan density to `Economy` and performance budget to `Capture` for faster policy-batch simulations.
