@@ -108,7 +108,11 @@ export class SwarmRunTelemetry {
         aoiActiveSeconds: 0,
         usefulAoiHitRateAfterContact: 0,
         avgAbsDeltaPsi: 0,
-        maxAbsDeltaPsi: 0
+        maxAbsDeltaPsi: 0,
+        avgRoleEntropy: 0,
+        minRoleEntropy: 0,
+        maxRoleEntropy: 0,
+        avgRoleEntropyNorm: 0
       },
       validity: {
         complete: false,
@@ -367,6 +371,7 @@ function computeTemporalMetrics(previousSample, sample) {
   const behaviorWeightChange = unionKeys(previousWeights, weights).reduce((sum, key) => (
     sum + Math.abs((weights[key] ?? 0) - (previousWeights[key] ?? 0))
   ), 0);
+  const roleEntropy = roleDistributionEntropy(sample.roleCounts);
 
   return {
     deltaSeconds,
@@ -389,7 +394,9 @@ function computeTemporalMetrics(previousSample, sample) {
     riskExposure: (sample.normalizedSignals?.riskPressure ?? 0) > 0.24 ? 1 : 0,
     riskPressure: sample.normalizedSignals?.riskPressure ?? 0,
     aoiProximityRisk: sample.normalizedSignals?.aoiProximityRisk ?? 0,
-    aoiActive: sample.aoiInFocus || (sample.aoiFocusedAgents ?? 0) > 0 ? 1 : 0
+    aoiActive: sample.aoiInFocus || (sample.aoiFocusedAgents ?? 0) > 0 ? 1 : 0,
+    roleEntropy: roleEntropy.entropy,
+    roleEntropyNorm: roleEntropy.normalized
   };
 }
 
@@ -444,8 +451,40 @@ function summarizeTemporalMetrics(samples = []) {
     usefulAoiHitRateAfterContact: weightedAverage(samplesWithAoi, 'aoiHitsPerSecond'),
     avgAbsDeltaPsi: summarizeNudgeMetrics(samples).avgAbsDeltaPsi,
     maxAbsDeltaPsi: summarizeNudgeMetrics(samples).maxAbsDeltaPsi,
+    avgRoleEntropy: weightedAverage(metrics, 'roleEntropy'),
+    minRoleEntropy: minMetric(metrics, 'roleEntropy'),
+    maxRoleEntropy: maxMetric(metrics, 'roleEntropy'),
+    avgRoleEntropyNorm: weightedAverage(metrics, 'roleEntropyNorm'),
     durationSeconds: seconds
   };
+}
+
+function roleDistributionEntropy(roleCounts = {}) {
+  const counts = Object.values(roleCounts ?? {})
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const total = counts.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) {
+    return { entropy: 0, normalized: 0 };
+  }
+  const entropy = counts.reduce((sum, count) => {
+    const p = count / total;
+    return sum - p * Math.log(p);
+  }, 0);
+  return {
+    entropy,
+    normalized: Math.min(Math.max(entropy / Math.log(4), 0), 1)
+  };
+}
+
+function minMetric(metrics, key) {
+  const values = metrics.map((item) => item[key]).filter((value) => Number.isFinite(value));
+  return values.length ? Math.min(...values) : 0;
+}
+
+function maxMetric(metrics, key) {
+  const values = metrics.map((item) => item[key]).filter((value) => Number.isFinite(value));
+  return values.length ? Math.max(...values) : 0;
 }
 
 function summarizeNudgeMetrics(samples = []) {

@@ -4778,8 +4778,9 @@ function renderTelemetryBatchSummary(group) {
       <strong>${escapeHtml(group.experiment.batchId)}</strong>
       <span>${group.runs.length} / ${group.experiment.total ?? '?'} policy/nudge run(s), ${group.experiment.runSeconds ?? '?'}s each. Valid ${summary.validCount}, invalid ${summary.invalidCount}, cancelled ${summary.cancelledCount}. Averages use valid runs only.</span>
       <span>Batch mode: ${escapeHtml(group.experiment.batchModeLabel ?? policyExperimentModeLabel(group.experiment.batchMode))}</span>
-      <span>Avg score ${formatScore(summary.avgScore)}, avg loss ${formatScore(summary.avgLoss)}, avg Pareto: coverage ${formatScore(summary.avgPareto.coverage_area)}, AOI ${formatScore(summary.avgPareto.aoi_detail)}, safety ${formatScore(summary.avgPareto.risk_safety)}, resource ${formatScore(summary.avgPareto.resource_efficiency)}</span>
-      <span>Best score: ${bestRun ? escapeHtml(batchRunLabel(bestRun.run)) : '--'} at ${formatScore(bestRun?.scoring.total)}. Lowest loss: ${lowestLossRun ? escapeHtml(batchRunLabel(lowestLossRun.run)) : '--'} at ${formatScore(lowestLossRun?.scoring.paretoLoss)}</span>
+      <span>Avg fixed score ${formatScore(summary.avgScore)}, fixed loss ${formatScore(summary.avgLoss)}, policy-aligned score ${formatScore(summary.avgPsiWeightedScore)}, loss ${formatScore(summary.avgPsiWeightedLoss)}</span>
+      <span>Avg Pareto: coverage ${formatScore(summary.avgPareto.coverage_area)}, AOI ${formatScore(summary.avgPareto.aoi_detail)}, safety ${formatScore(summary.avgPareto.risk_safety)}, resource ${formatScore(summary.avgPareto.resource_efficiency)}. Role entropy ${formatScore(summary.avgRoleEntropyNorm)}</span>
+      <span>Best fixed score: ${bestRun ? escapeHtml(batchRunLabel(bestRun.run)) : '--'} at ${formatScore(bestRun?.scoring.fixedParetoScore ?? bestRun?.scoring.total)}. Lowest fixed loss: ${lowestLossRun ? escapeHtml(batchRunLabel(lowestLossRun.run)) : '--'} at ${formatScore(lowestLossRun?.scoring.fixedParetoLoss ?? lowestLossRun?.scoring.paretoLoss)}</span>
       <span>Preset averages: ${renderBatchAverageList(summary.byPreset)}</span>
       <span>Nudge averages: ${renderBatchAverageList(summary.byNudge)}</span>
     </div>
@@ -4800,6 +4801,9 @@ function summarizeTelemetryBatch(runs) {
     cancelledCount,
     avgScore: average(analysisRuns.map(({ scoring }) => scoring.total)),
     avgLoss: average(analysisRuns.map(({ scoring }) => scoring.paretoLoss)),
+    avgPsiWeightedScore: average(analysisRuns.map(({ scoring }) => scoring.psiWeightedParetoScore)),
+    avgPsiWeightedLoss: average(analysisRuns.map(({ scoring }) => scoring.psiWeightedParetoLoss)),
+    avgRoleEntropyNorm: average(analysisRuns.map(({ run, scoring }) => run.temporalSummary?.avgRoleEntropyNorm ?? scoring.temporalMeasures?.avgRoleEntropyNorm)),
     avgPareto: averagePareto(analysisRuns),
     bestRun: bestBy(analysisRuns, ({ scoring }) => scoring.total),
     lowestLossRun: bestBy(analysisRuns, ({ scoring }) => -scoring.paretoLoss),
@@ -4822,6 +4826,8 @@ function summarizeBatchDimension(scoredRuns, labelForRun) {
       count: items.length,
       avgScore: average(items.map(({ scoring }) => scoring.total)),
       avgLoss: average(items.map(({ scoring }) => scoring.paretoLoss)),
+      avgPsiWeightedScore: average(items.map(({ scoring }) => scoring.psiWeightedParetoScore)),
+      avgRoleEntropyNorm: average(items.map(({ run, scoring }) => run.temporalSummary?.avgRoleEntropyNorm ?? scoring.temporalMeasures?.avgRoleEntropyNorm)),
       avgPareto: averagePareto(items)
     }))
     .sort((a, b) => b.avgScore - a.avgScore);
@@ -4841,7 +4847,7 @@ function renderBatchAverageList(items) {
     return '--';
   }
   return items
-    .map((item) => `${escapeHtml(item.label)} ${formatScore(item.avgScore)} / loss ${formatScore(item.avgLoss)} / n${item.count}`)
+    .map((item) => `${escapeHtml(item.label)} fixed ${formatScore(item.avgScore)} / loss ${formatScore(item.avgLoss)} / entropy ${formatScore(item.avgRoleEntropyNorm)} / n${item.count}`)
     .join('; ');
 }
 
@@ -4878,9 +4884,10 @@ function renderTelemetryRunCard(run) {
     const temporal = scoring.temporalMeasures ?? {};
     return `
       <div class="telemetry-run">
-        <strong>${escapeHtml(experiment ? `${experiment.index}/${experiment.total} ${experiment.label} / ${experiment.nudgeProfileLabel}` : run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / score ${formatScore(scoring.total)} / loss ${formatScore(scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
+        <strong>${escapeHtml(experiment ? `${experiment.index}/${experiment.total} ${experiment.label} / ${experiment.nudgeProfileLabel}` : run.status)} / ${escapeHtml(aoi)} / ${elapsedSeconds}s / fixed score ${formatScore(scoring.fixedParetoScore ?? scoring.total)} / loss ${formatScore(scoring.fixedParetoLoss ?? scoring.paretoLoss)} / confidence ${formatScore(scoring.confidence)}</strong>
         <span>${(run.totals?.rawHits ?? 0).toLocaleString()} raw hits, ${(run.totals?.pointVoxels ?? 0).toLocaleString()} point voxels, ${(run.totals?.focusedHits ?? 0).toLocaleString()} focused, k${run.samples?.at?.(-1)?.adaptiveNeighborTarget ?? run.network?.avgAdaptiveNeighborTarget?.toFixed?.(1) ?? '--'}</span>
         <span>Pareto coverage ${formatScore(pareto.coverage_area)}, AOI detail ${formatScore(pareto.aoi_detail)}, safety ${formatScore(pareto.risk_safety)}, resource ${formatScore(pareto.resource_efficiency)}</span>
+        <span>Policy-aligned score ${formatScore(scoring.psiWeightedParetoScore ?? scoring.policyAlignedScore)}, loss ${formatScore(scoring.psiWeightedParetoLoss ?? scoring.policyAlignedLoss)}, role entropy ${formatScore(temporal.avgRoleEntropyNorm ?? 0)}</span>
         <span>Nudge ${escapeHtml(run.runtimeNudgeProfile ?? run.behaviorProfile?.runtimeNudgeProfile ?? '--')} (${formatMetricValue(run.runtimeNudgeScale ?? run.behaviorProfile?.runtimeNudgeScale ?? 0)}x), avg |delta psi| ${formatMetricValue(run.nudgeSummary?.avgAbsDeltaPsi ?? 0)}, max ${formatMetricValue(run.nudgeSummary?.maxAbsDeltaPsi ?? 0)}</span>
         ${experiment ? `<span>Policy batch ${escapeHtml(experiment.id)} / ${escapeHtml(experiment.batchId)}</span>` : ''}
         <span>AOI ${formatScore(components.aoiQuality)}, coverage ${formatScore(components.coverage)}, network ${formatScore(components.networkResilience)}, compute ${formatScore(components.computeEfficiency)}, energy ${formatScore(components.energyProxy)}, smooth ${formatScore(components.adaptationSmoothness)}, safety ${formatScore(components.constraintSafety)}</span>
@@ -4951,7 +4958,11 @@ async function exportTelemetryRuns() {
     return;
   }
 
-  const blob = new Blob([JSON.stringify(runs, null, 2)], { type: 'application/json' });
+  const exportRuns = runs.map((run) => ({
+    ...run,
+    scoring: scoreRunForActiveObjective(run)
+  }));
+  const blob = new Blob([JSON.stringify(exportRuns, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -5021,6 +5032,10 @@ function telemetryRunCsvRow(run) {
     redundant_footprint_area_m2: run.totals?.redundantFootprintAreaM2 ?? 0,
     score: scoring.total,
     pareto_loss: scoring.paretoLoss,
+    fixed_pareto_score: scoring.fixedParetoScore ?? scoring.total,
+    fixed_pareto_loss: scoring.fixedParetoLoss ?? scoring.paretoLoss,
+    psi_weighted_pareto_score: scoring.psiWeightedParetoScore ?? scoring.policyAlignedScore ?? '',
+    psi_weighted_pareto_loss: scoring.psiWeightedParetoLoss ?? scoring.policyAlignedLoss ?? '',
     confidence: scoring.confidence,
     pareto_coverage_area: pareto.coverage_area ?? 0,
     pareto_aoi_detail: pareto.aoi_detail ?? 0,
@@ -5050,6 +5065,10 @@ function telemetryRunCsvRow(run) {
     avg_new_voxels_per_s: temporal.avgNewPointVoxelsPerSecond ?? 0,
     avg_aoi_hits_per_s: temporal.avgAoiHitsPerSecond ?? 0,
     useful_aoi_hits_per_s_after_contact: temporal.usefulAoiHitRateAfterContact ?? 0,
+    avg_role_entropy: temporal.avgRoleEntropy ?? 0,
+    min_role_entropy: temporal.minRoleEntropy ?? 0,
+    max_role_entropy: temporal.maxRoleEntropy ?? 0,
+    avg_role_entropy_norm: temporal.avgRoleEntropyNorm ?? 0,
     network_fragmented_s: temporal.networkFragmentedSeconds ?? 0,
     risk_exposure_s: temporal.riskExposureSeconds ?? 0,
     battery_remaining_pct: run.resources?.batteryRemainingPct ?? '',

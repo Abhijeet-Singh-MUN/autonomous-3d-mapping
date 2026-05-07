@@ -68,7 +68,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - `Run Policy Batch` cycles through four starter policy presets across five nudge profiles on the current scenario, using the configured batch seconds value, and saves each preset/profile as a normal telemetry run with experiment metadata. Telemetry groups policy-batch runs by batch id.
 - `Policy batch mode` selects either the 20-run nudge-calibration sweep or a 4-run Pareto-only comparison that keeps the currently selected nudge profile fixed.
 - The 20-run policy/nudge batch is a nudge-calibration phase. Once a default nudge profile is chosen, later batches should mostly vary the four Pareto policy coordinates.
-- Telemetry batch headers summarize valid/invalid/cancelled counts, average score/loss, best run, lowest loss, and per-preset/per-nudge averages for quick in-sim checks before external analysis.
+- Telemetry batch headers summarize valid/invalid/cancelled counts, average fixed score/loss, policy-aligned score/loss, role entropy, best run, lowest loss, and per-preset/per-nudge averages for quick in-sim checks before external analysis.
 - `Dataset workspace` tags telemetry runs and export filenames. Use a new workspace name for new calibration/model/data campaigns; old IndexedDB runs remain available.
 - Saved workspace names are remembered locally, and Telemetry can filter by active workspace, all workspaces, legacy/untagged runs, or a named workspace.
 - Workspace clearing deletes IndexedDB telemetry for one selected workspace only after typing the exact workspace name. It can optionally remove the saved workspace name, but it never clears all workspaces.
@@ -82,7 +82,7 @@ If Vite chooses another port, use the URL printed by `npm.cmd run dev`.
 - Soft constraints are now normalized controller signals too: AOI proximity risk, mission-time pressure, battery reserve pressure, and compute pressure. They influence avoidance/efficiency behavior and the `constraintSafety` score without adding a hard collision-physics layer.
 - `src/swarm/run-telemetry.js` persists swarm run records to IndexedDB, and the `Telemetry` sidebar panel can refresh saved runs or export them as JSON.
 - The `Algorithm` sidebar panel shows live behavior weights, normalized signals, derived controls, role counts, and objective profile.
-- Saved telemetry runs include objective scoring components for AOI quality, coverage, network resilience, time efficiency, compute efficiency, and energy/path proxy.
+- Saved telemetry runs include objective scoring components for AOI quality, coverage, network resilience, time efficiency, compute efficiency, and energy/path proxy. The default comparison score is now the equal-weight fixed Pareto evaluator; psi-weighted scoring remains a policy-aligned diagnostic.
 - `src/swarm/resource-model.js` adds first-pass placeholder resource accounting for hover, motion, sensor, compute, communication, total Wh, and estimated battery remaining. Treat these as schema/relative metrics until calibrated from sourced hardware specs.
 - `src/swarm/run-telemetry.js` now saves per-sample temporal metrics and per-run temporal summaries, including new voxels/sec, AOI hit rate after contact, energy/compute rate, network fragmentation time, and behavior-weight change rate.
 - LiDAR footprint coverage is now tracked as metrics only: total/unique/redundant footprint area, redundancy ratio, and resolution score. It does not create synthetic point-cloud samples.

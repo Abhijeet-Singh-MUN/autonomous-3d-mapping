@@ -41,7 +41,8 @@ Swarm V1 builds on that system without rewriting the current path planner.
   - Four optimizer-facing policy coordinates: coverage area, AOI detail, risk safety, and resource efficiency
   - Uniform runtime nudge profiles for measuring local adaptation strength before optimizer work
   - Policy batch runs that vary policy presets and nudge profiles while keeping the scenario fixed
-  - In-sim batch summaries for quick validity, best-run, average score/loss, and Pareto-vector checks before external analysis
+  - In-sim batch summaries for quick validity, best-run, fixed score/loss, policy-aligned score/loss, role entropy, and Pareto-vector checks before external analysis
+  - Fixed equal-weight Pareto scoring as the default research evaluator, with psi-weighted scoring kept as a secondary policy self-consistency diagnostic
   - Calibration sequence: run the first 20-run nudge sweep, choose/freeze a default nudge profile, then switch to Pareto-only 4-run batches that keep that nudge profile fixed
   - Dataset workspace names that tag telemetry runs and export filenames for separate calibration/experiment campaigns
   - Browser-local workspace manager for saving/selecting/filtering/clearing experiment campaigns with exact-name confirmation

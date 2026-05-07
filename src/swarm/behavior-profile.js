@@ -21,6 +21,13 @@ export const DEFAULT_POLICY_COORDINATES = {
   resource_efficiency: 0.15
 };
 
+export const FIXED_PARETO_EVALUATOR_WEIGHTS = {
+  coverage_area: 0.25,
+  aoi_detail: 0.25,
+  risk_safety: 0.25,
+  resource_efficiency: 0.25
+};
+
 export const BASE_RUNTIME_NUDGE_CAP = 0.1;
 
 export const RUNTIME_NUDGE_PROFILES = {
@@ -757,7 +764,11 @@ export function scoreSwarmRun(run, profile = DEFAULT_SWARM_BEHAVIOR_PROFILE) {
     riskExposureSeconds: temporal.riskExposureSeconds ?? 0,
     avgRiskPressure: temporal.avgRiskPressure ?? 0,
     avgAoiProximityRisk: temporal.avgAoiProximityRisk ?? 0,
-    aoiActiveSeconds: temporal.aoiActiveSeconds ?? 0
+    aoiActiveSeconds: temporal.aoiActiveSeconds ?? 0,
+    avgRoleEntropy: temporal.avgRoleEntropy ?? 0,
+    minRoleEntropy: temporal.minRoleEntropy ?? 0,
+    maxRoleEntropy: temporal.maxRoleEntropy ?? 0,
+    avgRoleEntropyNorm: temporal.avgRoleEntropyNorm ?? 0
   };
 
   const aoiQuality = aoiRequired
@@ -813,11 +824,12 @@ export function scoreSwarmRun(run, profile = DEFAULT_SWARM_BEHAVIOR_PROFILE) {
     risk_safety: clamp01(components.constraintSafety * 0.44 + components.networkResilience * 0.38 + components.adaptationSmoothness * 0.18),
     resource_efficiency: clamp01(components.energyProxy * 0.52 + components.computeEfficiency * 0.34 + components.timeEfficiency * 0.14)
   };
-  const paretoLoss = Object.entries(policyCoordinates).reduce((sum, [key, weight]) => {
-    const score = paretoVector[key] ?? 0;
-    return sum + weight * Math.abs(1 - score);
-  }, 0);
-  const scalarScore = clamp01(1 - paretoLoss) * validityComplete;
+  const fixedParetoLossRaw = weightedParetoLoss(paretoVector, FIXED_PARETO_EVALUATOR_WEIGHTS);
+  const psiWeightedParetoLossRaw = weightedParetoLoss(paretoVector, policyCoordinates);
+  const fixedParetoLoss = validityComplete ? fixedParetoLossRaw : 1;
+  const psiWeightedParetoLoss = validityComplete ? psiWeightedParetoLossRaw : 1;
+  const fixedParetoScore = clamp01(1 - fixedParetoLoss);
+  const psiWeightedParetoScore = clamp01(1 - psiWeightedParetoLoss);
   const objectiveTotal = clamp01(weightedScore / weightTotal) * validityComplete;
 
   return {
@@ -828,11 +840,18 @@ export function scoreSwarmRun(run, profile = DEFAULT_SWARM_BEHAVIOR_PROFILE) {
     modelVersion: run?.modelVersion ?? run?.behaviorProfile?.modelVersion ?? profile.modelVersion ?? GREYBOX_POLICY_MODEL.modelVersion,
     policyCoordinates,
     paretoVector,
-    paretoLoss: validityComplete ? paretoLoss : 1,
-    scalarScore,
+    fixedEvaluatorWeights: { ...FIXED_PARETO_EVALUATOR_WEIGHTS },
+    fixedParetoScore,
+    fixedParetoLoss,
+    psiWeightedParetoScore,
+    psiWeightedParetoLoss,
+    paretoLoss: fixedParetoLoss,
+    scalarScore: fixedParetoScore,
+    policyAlignedScore: psiWeightedParetoScore,
+    policyAlignedLoss: psiWeightedParetoLoss,
     objectiveTotal,
     evaluationProfileVersion: evaluation.version,
-    total: scalarScore,
+    total: fixedParetoScore,
     validMultiplier: validityComplete,
     confidence: clamp01((rawMeasures.scanPasses / 20) * 0.5 + (rawMeasures.telemetrySamples / 10) * 0.5) * validityComplete,
     components,
@@ -841,6 +860,14 @@ export function scoreSwarmRun(run, profile = DEFAULT_SWARM_BEHAVIOR_PROFILE) {
     temporalMeasures,
     normalizers
   };
+}
+
+function weightedParetoLoss(paretoVector, weights) {
+  const normalizedWeights = normalizePolicyCoordinates(weights);
+  return Object.entries(normalizedWeights).reduce((sum, [key, weight]) => {
+    const score = paretoVector[key] ?? 0;
+    return sum + weight * Math.abs(1 - score);
+  }, 0);
 }
 
 function summarizeRunTemporalMetrics(samples = []) {
@@ -867,8 +894,22 @@ function summarizeRunTemporalMetrics(samples = []) {
     riskExposureSeconds: metrics.reduce((sum, item) => sum + (item.riskExposure ? item.deltaSeconds ?? 0 : 0), 0),
     avgRiskPressure: temporalWeightedAverage(metrics, 'riskPressure', duration),
     avgAoiProximityRisk: temporalWeightedAverage(metrics, 'aoiProximityRisk', duration),
-    aoiActiveSeconds: aoiActive.reduce((sum, item) => sum + (item.deltaSeconds ?? 0), 0)
+    aoiActiveSeconds: aoiActive.reduce((sum, item) => sum + (item.deltaSeconds ?? 0), 0),
+    avgRoleEntropy: temporalWeightedAverage(metrics, 'roleEntropy', duration),
+    minRoleEntropy: minMetric(metrics, 'roleEntropy'),
+    maxRoleEntropy: maxMetric(metrics, 'roleEntropy'),
+    avgRoleEntropyNorm: temporalWeightedAverage(metrics, 'roleEntropyNorm', duration)
   };
+}
+
+function minMetric(metrics, key) {
+  const values = metrics.map((item) => item[key]).filter((value) => Number.isFinite(value));
+  return values.length ? Math.min(...values) : 0;
+}
+
+function maxMetric(metrics, key) {
+  const values = metrics.map((item) => item[key]).filter((value) => Number.isFinite(value));
+  return values.length ? Math.max(...values) : 0;
 }
 
 function temporalWeightedAverage(metrics, key, knownDuration = null) {

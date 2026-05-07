@@ -33,7 +33,7 @@ The fastest serious research path is:
 The required implementation is mostly in place:
 
 - persistent run telemetry
-- Pareto vector scoring
+- Pareto vector scoring with fixed equal-weight evaluator for fair comparison
 - validity filtering
 - temporal metrics
 - batch runner
@@ -80,7 +80,8 @@ Use fixed-time budgets for this calibration phase. Start with `120s` nudge-calib
 
 Current metrics are strong enough for first-pass grey-box calibration and pilot research:
 
-- score and Pareto loss
+- fixed score/loss, psi-weighted diagnostic score/loss, and Pareto vector
+- role entropy as a behavioral organization signature
 - coverage, AOI detail, risk safety, and resource efficiency scores
 - scan totals and point voxels
 - unique/redundant LiDAR footprint area
@@ -119,7 +120,8 @@ resource_efficiency
 The optimizer target should be a configurable loss:
 
 ```text
-loss = weighted distance from ideal Pareto vector
+fixed loss = equal-weight distance from ideal Pareto vector
+psi-weighted loss = policy-aligned diagnostic distance from ideal Pareto vector
 ```
 
 The browser simulator should continue to collect and export runs. External Python tooling should handle GP fitting, plotting, sensitivity analysis, and next-candidate selection.

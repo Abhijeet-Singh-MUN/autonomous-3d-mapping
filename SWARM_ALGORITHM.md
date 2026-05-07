@@ -215,11 +215,25 @@ pareto = {
   resource_efficiency
 }
 
-loss = sum_i psi_i * abs(1 - pareto_i)
-score = 1 - loss
+fixed_loss = sum_i 0.25 * abs(1 - pareto_i)
+fixed_score = 1 - fixed_loss
+
+psi_weighted_loss = sum_i psi_i * abs(1 - pareto_i)
+psi_weighted_score = 1 - psi_weighted_loss
 ```
 
-The run record stores both the Pareto vector and the scalar score/loss. This lets the UI sort runs while preserving why a run was good or bad. The older named score components still exist as diagnostics and can be reweighted for specific research questions.
+The fixed evaluator is the default research and comparison score. It uses equal weights so every run is graded against the same external ruler rather than being scored by the policy weights it chose for itself. The older `psi`-weighted score is still stored as a policy-aligned diagnostic: it answers whether a run performed well on the objectives that policy emphasized, but it should not be the primary cross-policy claim.
+
+The run record stores the Pareto vector, fixed score/loss, and policy-aligned score/loss. `paretoLoss` remains an alias for `fixedParetoLoss` so older UI/export code stays compatible. The older named score components still exist as diagnostics and can be reweighted for specific research questions.
+
+Role entropy is also part of the telemetry interpretation layer:
+
+```text
+H = -sum_r p_r * ln(p_r)
+H_norm = H / ln(4)
+```
+
+Low normalized entropy means one role dominates the swarm at that time. Higher normalized entropy means the scout/mapper/relay/verifier distribution is more balanced. This gives the paper a simple behavioral signature for whether a policy creates organized specialization or spreads work broadly.
 
 Telemetry is namespaced by model family. New runs save `greybox-policy-v1` and `greybox-policy-v1.0`; the telemetry panel defaults to compatible runs only. Older IndexedDB records remain stored but do not pollute new-model analysis unless a future UI explicitly opts into cross-family comparison.
 

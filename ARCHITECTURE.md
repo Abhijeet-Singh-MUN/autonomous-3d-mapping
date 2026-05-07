@@ -111,7 +111,9 @@ Telemetry records are compatibility-filtered by model family. New grey-box runs 
 
 Runtime nudge calibration sits before optimizer work. The browser controller records base policy coordinates, uniform runtime nudges, effective policy coordinates, delta policy coordinates, and nudge profile metadata so policy-batch runs can show whether local adaptation is too weak, useful, or too dominant.
 
-The telemetry panel owns only lightweight experiment summaries: valid/cancelled counts, best run, average score/loss, and per-preset/per-nudge Pareto averages. Heavy statistical processing, plots, GP surrogate fitting, and optimizer loops remain outside the browser export path until the schema stabilizes.
+The telemetry panel owns only lightweight experiment summaries: valid/cancelled counts, best run, average fixed score/loss, policy-aligned score/loss, role entropy, and per-preset/per-nudge Pareto averages. Heavy statistical processing, plots, GP surrogate fitting, and optimizer loops remain outside the browser export path until the schema stabilizes.
+
+Research comparison uses an equal-weight fixed Pareto evaluator by default. The psi-weighted evaluator remains in the run record as a policy self-consistency diagnostic, so optimizer-facing policy coordinates do not grade themselves during cross-policy comparison.
 
 Telemetry now records a user-facing dataset workspace name. Browser storage remains IndexedDB, but the workspace name separates calibration campaigns in run metadata and export filenames. JSON export remains the canonical full record; CSV export is the flattened analysis surface for external notebooks and optimizer tooling.
 

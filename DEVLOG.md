@@ -22,6 +22,8 @@ This log captures why changes are made, which issues they address, and what they
 - Decided to defer auto-duration. Fixed 120-second runs remain the calibration standard for now; AOI distance/contact/dwell variation will be recorded and analyzed rather than normalized away.
 - Recorded the role-control direction: every drone keeps baseline mapping, but future behavior work should give scouts, mappers, relays, and verifiers more distinct downstream controls driven by Pareto/effective-psi and derived parameters.
 - Recorded the future semantic-map direction: rational object layouts, semantic point labels, semantic point-cloud export, and language-aware 3DGS/reconstruction data.
+- Replaced policy-weighted Pareto scoring as the default comparison score with an equal-weight fixed evaluator, while keeping the psi-weighted score as a policy-aligned diagnostic.
+- Added role entropy from sampled role counts so batches can report whether behavior is dominated by one role or distributed across scout/mapper/relay/verifier roles.
 - Telemetry now records base psi, runtime nudge, effective psi, delta psi, nudge profile, and avg/max absolute delta psi.
 - Documented adversarial non-combat stressors as allowed future resilience/dataset scenarios while keeping strike, targeting, weapons, military autonomy, and harmful jamming instructions out of scope.
 - Changed the default scan density to `Economy` and performance budget to `Capture` for faster policy-batch simulations.
